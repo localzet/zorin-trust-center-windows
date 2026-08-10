@@ -14,28 +14,30 @@ import (
 )
 
 const (
-	WM_DESTROY       = 0x0002
-	WM_COMMAND       = 0x0111
-	WM_USER          = 0x0400
-	WM_LBUTTONUP     = 0x0202
-	WM_LBUTTONDBLCLK = 0x0203
-	WM_RBUTTONUP     = 0x0205
-	NIM_ADD          = 0x00000000
-	NIM_MODIFY       = 0x00000001
-	NIM_DELETE       = 0x00000002
-	NIF_MESSAGE      = 0x00000001
-	NIF_ICON         = 0x00000002
-	NIF_TIP          = 0x00000004
-	IMAGE_ICON       = 1
-	LR_LOADFROMFILE  = 0x0010
-	MF_STRING        = 0x00000000
-	TPM_RIGHTBUTTON  = 0x0002
-	TPM_BOTTOMALIGN  = 0x0020
-	SW_SHOWNORMAL    = 1
-	IDC_OPEN         = 1001
-	IDC_PAIR         = 1002
-	IDC_EXIT         = 1003
-	trayMessage      = WM_USER + 17
+	WM_DESTROY           = 0x0002
+	WM_COMMAND           = 0x0111
+	WM_USER              = 0x0400
+	WM_LBUTTONUP         = 0x0202
+	WM_LBUTTONDBLCLK     = 0x0203
+	WM_RBUTTONUP         = 0x0205
+	NIM_ADD              = 0x00000000
+	NIM_MODIFY           = 0x00000001
+	NIM_DELETE           = 0x00000002
+	NIM_SETVERSION       = 0x00000004
+	NOTIFYICON_VERSION_4 = 4
+	NIF_MESSAGE          = 0x00000001
+	NIF_ICON             = 0x00000002
+	NIF_TIP              = 0x00000004
+	IMAGE_ICON           = 1
+	LR_LOADFROMFILE      = 0x0010
+	MF_STRING            = 0x00000000
+	TPM_RIGHTBUTTON      = 0x0002
+	TPM_BOTTOMALIGN      = 0x0020
+	SW_SHOWNORMAL        = 1
+	IDC_OPEN             = 1001
+	IDC_PAIR             = 1002
+	IDC_EXIT             = 1003
+	trayMessage          = WM_USER + 17
 )
 
 type point struct{ X, Y int32 }
@@ -84,30 +86,34 @@ type uiState struct {
 }
 
 var (
-	user32               = syscall.NewLazyDLL("user32.dll")
-	shell32              = syscall.NewLazyDLL("shell32.dll")
-	kernel32             = syscall.NewLazyDLL("kernel32.dll")
-	pRegisterClassEx     = user32.NewProc("RegisterClassExW")
-	pCreateWindowEx      = user32.NewProc("CreateWindowExW")
-	pDefWindowProc       = user32.NewProc("DefWindowProcW")
-	pGetMessage          = user32.NewProc("GetMessageW")
-	pTranslateMessage    = user32.NewProc("TranslateMessage")
-	pDispatchMessage     = user32.NewProc("DispatchMessageW")
-	pPostQuitMessage     = user32.NewProc("PostQuitMessage")
-	pShellNotifyIcon     = shell32.NewProc("Shell_NotifyIconW")
-	pLoadImage           = user32.NewProc("LoadImageW")
-	pCreatePopupMenu     = user32.NewProc("CreatePopupMenu")
-	pAppendMenu          = user32.NewProc("AppendMenuW")
-	pTrackPopupMenu      = user32.NewProc("TrackPopupMenu")
-	pDestroyMenu         = user32.NewProc("DestroyMenu")
-	pGetCursorPos        = user32.NewProc("GetCursorPos")
-	pSetForegroundWindow = user32.NewProc("SetForegroundWindow")
-	pGetModuleHandle     = kernel32.NewProc("GetModuleHandleW")
+	user32                 = syscall.NewLazyDLL("user32.dll")
+	shell32                = syscall.NewLazyDLL("shell32.dll")
+	kernel32               = syscall.NewLazyDLL("kernel32.dll")
+	pRegisterClassEx       = user32.NewProc("RegisterClassExW")
+	pRegisterWindowMessage = user32.NewProc("RegisterWindowMessageW")
+	pCreateWindowEx        = user32.NewProc("CreateWindowExW")
+	pDefWindowProc         = user32.NewProc("DefWindowProcW")
+	pGetMessage            = user32.NewProc("GetMessageW")
+	pTranslateMessage      = user32.NewProc("TranslateMessage")
+	pDispatchMessage       = user32.NewProc("DispatchMessageW")
+	pPostQuitMessage       = user32.NewProc("PostQuitMessage")
+	pShellNotifyIcon       = shell32.NewProc("Shell_NotifyIconW")
+	pLoadImage             = user32.NewProc("LoadImageW")
+	pCreatePopupMenu       = user32.NewProc("CreatePopupMenu")
+	pAppendMenu            = user32.NewProc("AppendMenuW")
+	pTrackPopupMenu        = user32.NewProc("TrackPopupMenu")
+	pDestroyMenu           = user32.NewProc("DestroyMenu")
+	pGetCursorPos          = user32.NewProc("GetCursorPos")
+	pSetForegroundWindow   = user32.NewProc("SetForegroundWindow")
+	pGetModuleHandle       = kernel32.NewProc("GetModuleHandleW")
+	pCreateMutex           = kernel32.NewProc("CreateMutexW")
+	pCloseHandle           = kernel32.NewProc("CloseHandle")
 )
 
 var hwnd uintptr
 var nid notifyIconData
 var uiScript, pairScript, statePath string
+var taskbarCreated uint32
 
 func u16(s string) *uint16 { p, _ := syscall.UTF16PtrFromString(s); return p }
 func copyTip(dst []uint16, s string) {
@@ -134,7 +140,21 @@ func openPair() {
 	_ = cmd.Start()
 }
 
+func addTrayIcon() bool {
+	if r, _, _ := pShellNotifyIcon.Call(NIM_ADD, uintptr(unsafe.Pointer(&nid))); r == 0 {
+		return false
+	}
+	nid.UVersion = NOTIFYICON_VERSION_4
+	pShellNotifyIcon.Call(NIM_SETVERSION, uintptr(unsafe.Pointer(&nid)))
+	return true
+}
+
 func wndProc(h uintptr, m uint32, w, l uintptr) uintptr {
+	if taskbarCreated != 0 && m == taskbarCreated {
+		// Explorer recreates the notification area after a restart. Re-add our icon.
+		addTrayIcon()
+		return 0
+	}
 	switch m {
 	case trayMessage:
 		switch uint32(l) {
@@ -206,12 +226,27 @@ func updateTip() {
 }
 
 func main() {
+	// Keep one tray instance per interactive Windows session.
+	mutexName := u16(`Local\ZorinTrustTray-v0.5`)
+	hMutex, _, mutexErr := pCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
+	if hMutex == 0 {
+		return
+	}
+	if mutexErr == syscall.Errno(183) { // ERROR_ALREADY_EXISTS
+		pCloseHandle.Call(hMutex)
+		return
+	}
+	defer pCloseHandle.Call(hMutex)
+
 	exe, _ := os.Executable()
 	dir := filepath.Dir(exe)
 	uiScript = filepath.Join(dir, "trust-center.ps1")
 	pairScript = filepath.Join(dir, "pair-phone.bat")
 	if appdata := os.Getenv("APPDATA"); appdata != "" {
 		statePath = filepath.Join(appdata, "ZorinTrust", "ui-state.json")
+	}
+	if r, _, _ := pRegisterWindowMessage.Call(uintptr(unsafe.Pointer(u16("TaskbarCreated")))); r != 0 {
+		taskbarCreated = uint32(r)
 	}
 	clsName := u16("ZorinTrustTrayWindow")
 	inst, _, _ := pGetModuleHandle.Call(0)
@@ -228,7 +263,7 @@ func main() {
 	hicon, _, _ := pLoadImage.Call(0, uintptr(unsafe.Pointer(u16(iconPath))), IMAGE_ICON, 0, 0, LR_LOADFROMFILE)
 	nid = notifyIconData{CbSize: uint32(unsafe.Sizeof(notifyIconData{})), HWnd: hwnd, UID: 1, UFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP, UCallbackMessage: trayMessage, HIcon: hicon}
 	copyTip(nid.SzTip[:], tooltip())
-	if r, _, _ := pShellNotifyIcon.Call(NIM_ADD, uintptr(unsafe.Pointer(&nid))); r == 0 {
+	if !addTrayIcon() {
 		return
 	}
 	go func() {

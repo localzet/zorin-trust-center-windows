@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-$src=Split-Path -Parent $MyInvocation.MyCommand.Path
+$src=$PSScriptRoot
 $dst=Join-Path $env:LOCALAPPDATA 'ZorinTrust\ui'
 New-Item -ItemType Directory -Force -Path $dst|Out-Null
 Copy-Item (Join-Path $src 'trust-center.ps1') $dst -Force
