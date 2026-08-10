@@ -235,7 +235,7 @@ func updateTip() {
 
 func main() {
 	// Keep one tray instance per interactive Windows session.
-	mutexName := u16(`Local\ZorinTrustTray-v0.6`)
+	mutexName := u16(`Local\ZorinTrustTray-v0.7`)
 	hMutex, _, mutexErr := pCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
 	if hMutex == 0 {
 		return

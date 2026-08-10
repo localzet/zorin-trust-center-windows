@@ -26,12 +26,12 @@ $TraySource = Join-Path $Here "app\ZorinTrustTray-windows-$A.exe"
 $IconSource = Join-Path $Here 'app\zorin-trust.ico'
 $PairSource = Join-Path $Here 'app\installer\pair-phone.ps1'
 $SigningScript = Join-Path $Here 'host\runtime-signing.ps1'
-$Unsigned = Join-Path $Here 'app\runtime\Zorin-Trust-Runtime-v8.0.0-unsigned.apk'
-$Signed = Join-Path $Artifacts 'Zorin-Trust-Runtime-v8.0.0-owner-signed.apk'
+$Unsigned = Join-Path $Here 'app\runtime\Zorin-Trust-Runtime-v8.1.0-unsigned.apk'
+$Signed = Join-Path $Artifacts 'Zorin-Trust-Runtime-v8.1.0-owner-signed.apk'
 $Required = @($HostSource,$OpsSource,$AuthoritySource,$TraySource,$IconSource,$PairSource,$SigningScript,$Unsigned)
 foreach($p in $Required){if(-not(Test-Path -LiteralPath $p)){throw "Release bundle is incomplete. Missing: $p"}}
 
-# Preserve the existing owner-managed signer. Ordinary v0.6 upgrades never migrate/unpair.
+# Preserve the existing owner-managed signer. Ordinary v0.7 upgrades never migrate/unpair.
 . $SigningScript
 Sign-ZorinRuntime $Unsigned $Signed | Out-Null
 if(-not(Test-Path -LiteralPath $Signed)){throw 'Runtime signing reported success but no signed APK was produced.'}
@@ -43,7 +43,7 @@ if($devices.Count -eq 1){
   if($LASTEXITCODE-ne0){throw 'Android Runtime update failed.'}
   try{& $AdbPath -s $devices[0] shell appops set dev.zorin.trustruntime SYSTEM_ALERT_WINDOW allow | Out-Null}catch{}
   try{& $AdbPath -s $devices[0] shell am start-foreground-service -n dev.zorin.trustruntime/dev.zorin.trustruntime.TrustService --ez dev.zorin.trust.ensure true | Out-Null}catch{}
-  Write-Host 'Android Runtime 8.0.0 updated with your existing local signer.' -ForegroundColor Green
+  Write-Host 'Android Runtime 8.1.0 updated with your existing local signer.' -ForegroundColor Green
 }else{Write-Warning "Phone Runtime not updated now (authorized adb devices: $($devices.Count)). Run Install.bat again with exactly one phone connected."}
 
 Import-Module ScheduledTasks -ErrorAction Stop
@@ -74,6 +74,6 @@ Start-Process -WindowStyle Hidden -FilePath $Ops
 Start-Process -WindowStyle Hidden -FilePath $Authority -ArgumentList 'serve'
 Start-Process $Tray
 
-Write-Host "Zorin Trust 0.6 installed. Host Agent PID $($pAgent.Id)." -ForegroundColor Green
+Write-Host "Zorin Trust 0.7 installed. Host Agent PID $($pAgent.Id)." -ForegroundColor Green
 Write-Host 'The tray opens Zorin Ops. When the trusted phone reconnects, Ops can open automatically.'
 Write-Host 'Raw diagnostics are under tools\developer; they are not part of the normal UI.'

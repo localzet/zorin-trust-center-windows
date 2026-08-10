@@ -15,3 +15,8 @@ No third-party GUI runtime is required: Windows PowerShell 5.1 + WPF/WinForms ar
 ## v0.5.1 installer/tray hardening
 
 The Windows release installer uses `$PSScriptRoot` for deterministic bundle-root resolution, preflights/signs the Android Runtime before stopping existing components, and installs a pairing launcher with paths appropriate to the installed UI directory. The native tray is single-instance and handles the Windows `TaskbarCreated` broadcast so it restores its notification-area icon after Explorer restarts.
+
+
+## v0.7 infrastructure release
+
+The desktop bundle now ships Zorin Ops 0.2 with editable/removable VPS entries, effective OpenSSH diagnostics and read-only Docker logs. Runtime upgrades continue to use the owner-managed local APK signer; there is no signer migration step.
