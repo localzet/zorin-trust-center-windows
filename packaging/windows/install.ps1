@@ -9,7 +9,8 @@ $Local = Join-Path $env:LOCALAPPDATA 'ZorinTrust'
 $Bin = Join-Path $Local 'bin'
 $Ui = Join-Path $Local 'ui'
 $Artifacts = Join-Path $Local 'artifacts'
-New-Item -ItemType Directory -Force -Path $State,$Bin,$Ui,$Artifacts | Out-Null
+$Logs = Join-Path $Local 'logs'
+New-Item -ItemType Directory -Force -Path $State,$Bin,$Ui,$Artifacts,$Logs | Out-Null
 
 $adb = Get-Command adb.exe -ErrorAction SilentlyContinue
 if (-not $adb) { $adb = Get-Command adb -ErrorAction SilentlyContinue }
@@ -23,12 +24,13 @@ $HostSource = Join-Path $Here "host\zorin-host-agent-windows-$A.exe"
 $OpsSource = Join-Path $Here "services\zorin-ops-windows-$A.exe"
 $AuthoritySource = Join-Path $Here "services\zorin-authority-windows-$A.exe"
 $TraySource = Join-Path $Here "app\ZorinTrustTray-windows-$A.exe"
+$BootstrapSource = Join-Path $Here "app\ZorinTrustBootstrap-windows-$A.exe"
 $IconSource = Join-Path $Here 'app\zorin-trust.ico'
 $PairSource = Join-Path $Here 'app\installer\pair-phone.ps1'
 $SigningScript = Join-Path $Here 'host\runtime-signing.ps1'
 $Unsigned = Join-Path $Here 'app\runtime\Zorin-Trust-Runtime-v8.1.0-unsigned.apk'
 $Signed = Join-Path $Artifacts 'Zorin-Trust-Runtime-v8.1.0-owner-signed.apk'
-$Required = @($HostSource,$OpsSource,$AuthoritySource,$TraySource,$IconSource,$PairSource,$SigningScript,$Unsigned)
+$Required = @($HostSource,$OpsSource,$AuthoritySource,$TraySource,$BootstrapSource,$IconSource,$PairSource,$SigningScript,$Unsigned)
 foreach($p in $Required){if(-not(Test-Path -LiteralPath $p)){throw "Release bundle is incomplete. Missing: $p"}}
 
 # Preserve the existing owner-managed signer. Ordinary v0.7 upgrades never migrate/unpair.
@@ -47,33 +49,67 @@ if($devices.Count -eq 1){
 }else{Write-Warning "Phone Runtime not updated now (authorized adb devices: $($devices.Count)). Run Install.bat again with exactly one phone connected."}
 
 Import-Module ScheduledTasks -ErrorAction Stop
-$taskNames=@('ZorinTrustHostAgent','ZorinTrustOps','ZorinTrustAuthority','ZorinTrustTray')
-foreach($t in $taskNames){try{Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue}catch{}}
-foreach($name in 'ZorinTrustTray','zorin-ops','zorin-authority','zorin-host-agent'){Get-Process $name -ErrorAction SilentlyContinue|Stop-Process -Force -ErrorAction SilentlyContinue}
-foreach($port in 47472,47474,47475){try{Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $port -State Listen -ErrorAction Stop|Select-Object -ExpandProperty OwningProcess -Unique|ForEach-Object{Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue}}catch{}}
 
-$Agent=Join-Path $Bin 'zorin-host-agent.exe';$Ops=Join-Path $Bin 'zorin-ops.exe';$Authority=Join-Path $Bin 'zorin-authority.exe';$Tray=Join-Path $Ui 'ZorinTrustTray.exe'
-Copy-Item $HostSource $Agent -Force;Copy-Item $OpsSource $Ops -Force;Copy-Item $AuthoritySource $Authority -Force;Copy-Item $TraySource $Tray -Force;Copy-Item $IconSource (Join-Path $Ui 'zorin-trust.ico') -Force;Copy-Item $PairSource (Join-Path $Ui 'Pair-Phone.ps1') -Force
-$PairBat="@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0Pair-Phone.ps1`"`r`npause`r`n";[IO.File]::WriteAllText((Join-Path $Ui 'pair-phone.bat'),$PairBat,[Text.Encoding]::ASCII)
+# Remove every historical Zorin Trust logon task from earlier bundles before
+# installing the single silent bootstrap task. This prevents old PowerShell/
+# console launchers from surviving upgrades and multiplying windows at logon.
+Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'ZorinTrust*' } | ForEach-Object {
+  try { Stop-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue } catch {}
+  try { Unregister-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+}
+foreach($name in 'ZorinTrustBootstrap','ZorinTrustTray','zorin-ops','zorin-authority','zorin-host-agent'){
+  Get-Process $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+}
+foreach($port in 47472,47474,47475){
+  try {
+    Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $port -State Listen -ErrorAction Stop |
+      Select-Object -ExpandProperty OwningProcess -Unique |
+      ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+  } catch {}
+}
+
+$Agent=Join-Path $Bin 'zorin-host-agent.exe'
+$Ops=Join-Path $Bin 'zorin-ops.exe'
+$Authority=Join-Path $Bin 'zorin-authority.exe'
+$Tray=Join-Path $Ui 'ZorinTrustTray.exe'
+$Bootstrap=Join-Path $Ui 'ZorinTrustBootstrap.exe'
+Copy-Item $HostSource $Agent -Force
+Copy-Item $OpsSource $Ops -Force
+Copy-Item $AuthoritySource $Authority -Force
+Copy-Item $TraySource $Tray -Force
+Copy-Item $BootstrapSource $Bootstrap -Force
+Copy-Item $IconSource (Join-Path $Ui 'zorin-trust.ico') -Force
+Copy-Item $PairSource (Join-Path $Ui 'Pair-Phone.ps1') -Force
+$PairBat="@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0Pair-Phone.ps1`"`r`npause`r`n"
+[IO.File]::WriteAllText((Join-Path $Ui 'pair-phone.bat'),$PairBat,[Text.Encoding]::ASCII)
 
 $user=[Security.Principal.WindowsIdentity]::GetCurrent().Name
-$settings=New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -Hidden
+$settings=New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 $principal=New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 $trigger=New-ScheduledTaskTrigger -AtLogOn -User $user
-function Install-UserTask([string]$Name,[string]$Exe,[string]$Args=''){
-  $action=if([string]::IsNullOrWhiteSpace($Args)){New-ScheduledTaskAction -Execute $Exe}else{New-ScheduledTaskAction -Execute $Exe -Argument $Args}
-  Register-ScheduledTask -TaskName $Name -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force|Out-Null
-}
-$AgentArgs='daemon --adb "{0}"' -f $AdbPath
-Install-UserTask 'ZorinTrustHostAgent' $Agent $AgentArgs
-Install-UserTask 'ZorinTrustOps' $Ops
-Install-UserTask 'ZorinTrustAuthority' $Authority 'serve'
-Install-UserTask 'ZorinTrustTray' $Tray
-$pAgent=Start-Process -WindowStyle Hidden -FilePath $Agent -ArgumentList $AgentArgs -PassThru
-Start-Process -WindowStyle Hidden -FilePath $Ops
-Start-Process -WindowStyle Hidden -FilePath $Authority -ArgumentList 'serve'
-Start-Process $Tray
+$BootstrapArgs='--adb "{0}"' -f $AdbPath
+$action=New-ScheduledTaskAction -Execute $Bootstrap -Argument $BootstrapArgs
+Register-ScheduledTask -TaskName 'ZorinTrustBootstrap' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+Start-ScheduledTask -TaskName 'ZorinTrustBootstrap'
 
-Write-Host "Zorin Trust 0.7 installed. Host Agent PID $($pAgent.Id)." -ForegroundColor Green
-Write-Host 'The tray opens Zorin Ops. When the trusted phone reconnects, Ops can open automatically.'
+function Wait-LocalListener([int]$Port,[int]$Seconds=10){
+  $deadline=(Get-Date).AddSeconds($Seconds)
+  do {
+    try {
+      $x=Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $Port -State Listen -ErrorAction Stop
+      if($x){ return $true }
+    } catch {}
+    Start-Sleep -Milliseconds 200
+  } while((Get-Date) -lt $deadline)
+  return $false
+}
+
+$failed=@()
+foreach($port in 47472,47474,47475){ if(-not(Wait-LocalListener $port 10)){ $failed += $port } }
+if($failed.Count -gt 0){
+  throw "Background bootstrap started but listener(s) did not become ready: $($failed -join ', '). See $Logs\\bootstrap.log and component logs."
+}
+
+Write-Host "Zorin Trust 0.7.1 installed. Silent bootstrap is running." -ForegroundColor Green
+Write-Host 'Background services now run through the console-free native bootstrap. The tray opens Ops only after its local HTTP endpoint is healthy.'
 Write-Host 'Raw diagnostics are under tools\developer; they are not part of the normal UI.'

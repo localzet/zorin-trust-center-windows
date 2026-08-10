@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -109,6 +110,7 @@ var (
 	pShellExecute          = shell32.NewProc("ShellExecuteW")
 	pGetCursorPos          = user32.NewProc("GetCursorPos")
 	pSetForegroundWindow   = user32.NewProc("SetForegroundWindow")
+	pMessageBox            = user32.NewProc("MessageBoxW")
 	pGetModuleHandle       = kernel32.NewProc("GetModuleHandleW")
 	pCreateMutex           = kernel32.NewProc("CreateMutexW")
 	pCloseHandle           = kernel32.NewProc("CloseHandle")
@@ -128,12 +130,55 @@ func copyTip(dst []uint16, s string) {
 	copy(dst, x)
 }
 
+func opsHealthy() bool {
+	c := &http.Client{Timeout: 350 * time.Millisecond}
+	r, err := c.Get("http://127.0.0.1:47474/api/state")
+	if err != nil {
+		return false
+	}
+	defer r.Body.Close()
+	return r.StatusCode >= 200 && r.StatusCode < 500
+}
+
+func startOpsHidden() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	ops := filepath.Join(filepath.Dir(filepath.Dir(exe)), "bin", "zorin-ops.exe")
+	if _, err := os.Stat(ops); err != nil {
+		return
+	}
+	cmd := exec.Command(ops)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	_ = cmd.Start()
+}
+
 func openOps() {
-	// Use ShellExecute rather than a script so a tray click is a direct user action.
+	// Never send the browser to a dead localhost endpoint. The tray can self-heal
+	// Ops even if the background bootstrap has not restarted it yet.
+	if !opsHealthy() {
+		startOpsHidden()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			time.Sleep(125 * time.Millisecond)
+			if opsHealthy() {
+				break
+			}
+		}
+	}
+	if !opsHealthy() {
+		text := u16("Zorin Ops is not responding on 127.0.0.1:47474.\n\nCheck %LOCALAPPDATA%\\ZorinTrust\\logs\\ops.log or run 6-STARTUP-DOCTOR.bat from the release bundle.")
+		caption := u16("Zorin Trust")
+		pMessageBox.Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(caption)), 0x10)
+		return
+	}
 	verb := u16("open")
 	url := u16("http://127.0.0.1:47474/")
 	pShellExecute.Call(0, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(url)), 0, 0, SW_SHOWNORMAL)
 }
+
+func requestOpenOps() { go openOps() }
 func openPair() {
 	if pairScript == "" {
 		return
@@ -165,7 +210,7 @@ func wndProc(h uintptr, m uint32, w, l uintptr) uintptr {
 		event := uint32(l & 0xffff)
 		switch event {
 		case WM_LBUTTONUP, WM_LBUTTONDBLCLK, NIN_SELECT, NIN_KEYSELECT:
-			openOps()
+			requestOpenOps()
 			return 0
 		case WM_RBUTTONUP:
 			showMenu()
@@ -174,7 +219,7 @@ func wndProc(h uintptr, m uint32, w, l uintptr) uintptr {
 	case WM_COMMAND:
 		switch int(w & 0xffff) {
 		case IDC_OPEN:
-			openOps()
+			requestOpenOps()
 		case IDC_PAIR:
 			openPair()
 		case IDC_EXIT:
@@ -235,7 +280,7 @@ func updateTip() {
 
 func main() {
 	// Keep one tray instance per interactive Windows session.
-	mutexName := u16(`Local\ZorinTrustTray-v0.7`)
+	mutexName := u16(`Local\ZorinTrustTray-v0.7.1`)
 	hMutex, _, mutexErr := pCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
 	if hMutex == 0 {
 		return
