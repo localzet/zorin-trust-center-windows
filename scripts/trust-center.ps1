@@ -1,133 +1,50 @@
-param([switch]$Tray)
-$ErrorActionPreference = 'SilentlyContinue'
-Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-
-$StateDir = Join-Path $env:APPDATA 'ZorinTrust'
-$LocalDir = Join-Path $env:LOCALAPPDATA 'ZorinTrust'
-$Agent = Join-Path $LocalDir 'bin\zorin-host-agent.exe'
-$UiDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RootDir = Split-Path -Parent $UiDir
-if (Test-Path (Join-Path $RootDir '2-PAIR-OWNER.bat')) { $BundleRoot = $RootDir } else { $BundleRoot = $null }
-
-function Read-JsonFile([string]$Path) {
-    if (-not (Test-Path $Path)) { return $null }
-    try { return (Get-Content -Raw -Path $Path | ConvertFrom-Json) } catch { return $null }
-}
-function Get-HostInfo {
-    $x = Read-JsonFile (Join-Path $StateDir 'host-info.json')
-    if ($null -ne $x) { return $x }
-    return [pscustomobject]@{ version='?'; host_fingerprint='?'; identity_provider='unknown'; protocol='ZTRUST/2'; pair_verification='?' }
-}
-function Get-TrustState {
-    $health = Read-JsonFile (Join-Path $StateDir 'daemon-health.json')
-    $sessions = Read-JsonFile (Join-Path $StateDir 'session.json')
-    $host = Get-HostInfo
-    $list = @()
-    if ($null -ne $sessions) { if ($sessions -is [System.Array]) { $list=@($sessions) } else { $list=@($sessions) } }
-    $trusted = $false; $present = $false; $phone = ''; $since=$null; $lastSeen=$null
-    foreach($s in $list) {
-        if ($s.trusted) { $trusted=$true; if(-not $phone){$phone=$s.phone_fingerprint}; $since=$s.since; $lastSeen=$s.last_seen }
-        if ($s.user_present) { $present=$true }
-    }
-    $devices=@();$reverse=@();$healthAge=999
-    if($null-ne$health){if($health.devices){$devices=@($health.devices)};if($health.reverse_ok){$reverse=@($health.reverse_ok)};try{$healthAge=((Get-Date)-(Get-Date $health.updated)).TotalSeconds}catch{}}
-    $transport = ($devices.Count -gt 0 -and $reverse.Count -gt 0 -and $healthAge -lt 8)
-    $authority = $trusted -and $present
-    $transportText = if($transport){'USB / ADB'}elseif($healthAge -lt 8){'RECOVERING'}else{'OFFLINE'}
-    return [pscustomobject]@{Trusted=$trusted;Present=$present;Authority=$authority;Transport=$transport;TransportText=$transportText;Phone=$phone;Since=$since;LastSeen=$lastSeen;Health=$health;Host=$host}
-}
-function Last-Events([int]$Count=40) {
-    $p=Join-Path $StateDir 'events.jsonl'; if(-not(Test-Path $p)){return @()}
-    $lines=@(Get-Content $p -Tail $Count);$out=@();foreach($line in $lines){try{$out+=($line|ConvertFrom-Json)}catch{}};return $out
-}
-function Set-StateText($Control,[string]$Text,[string]$Kind) {
-    $Control.Text=$Text
-    switch($Kind){'good'{$Control.Foreground='#FFF04B5F'}'warn'{$Control.Foreground='#FFF2B84B'}'bad'{$Control.Foreground='#FFFF6478'}default{$Control.Foreground='#FFB7C3CF'}}
-}
-
-[xml]$xaml = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Zorin Trust Center" Width="1040" Height="720" MinWidth="900" MinHeight="620"
-        Background="#FF080D13" Foreground="#FFE7EDF4" WindowStartupLocation="CenterScreen" FontFamily="Segoe UI">
-    <Window.Resources>
-        <Style TargetType="Button"><Setter Property="Background" Value="#FF24151B"/><Setter Property="Foreground" Value="#FFF04B5F"/><Setter Property="BorderBrush" Value="#FF6A2935"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="14,8"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
-        <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="#FF0E151E"/><Setter Property="BorderBrush" Value="#FF26313D"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="14"/></Style>
-    </Window.Resources>
-    <Grid Margin="22">
-        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="110"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-        <Grid Grid.Row="0" Margin="0,0,0,16">
-            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <StackPanel><TextBlock Text="ZORIN TRUST" FontSize="30" FontWeight="Bold"/><TextBlock Text="TRUST CENTER  /  OWNER WORKSTATION" Foreground="#FF8292A1" FontSize="12"/></StackPanel>
-            <Border Grid.Column="1" Background="#FF25141A" BorderBrush="#FF6A2935" BorderThickness="1" CornerRadius="14" Padding="14,7" VerticalAlignment="Center"><TextBlock x:Name="OverallBadge" Text="OFFLINE" Foreground="#FFF04B5F" FontWeight="Bold"/></Border>
-        </Grid>
-        <Grid Grid.Row="1" Margin="0,0,0,16">
-            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-            <Border Style="{StaticResource Card}" Margin="0,0,10,0"><StackPanel><TextBlock Text="DEVICE TRUST" Foreground="#FF778A9C"/><TextBlock x:Name="DeviceTrust" Text="OFFLINE" FontSize="21" FontWeight="Bold" Margin="0,12,0,0"/></StackPanel></Border>
-            <Border Grid.Column="1" Style="{StaticResource Card}" Margin="0,0,10,0"><StackPanel><TextBlock Text="OWNER PRESENCE" Foreground="#FF778A9C"/><TextBlock x:Name="OwnerPresence" Text="UNKNOWN" FontSize="21" FontWeight="Bold" Margin="0,12,0,0"/></StackPanel></Border>
-            <Border Grid.Column="2" Style="{StaticResource Card}" Margin="0,0,10,0"><StackPanel><TextBlock Text="AUTHORITY" Foreground="#FF778A9C"/><TextBlock x:Name="Authority" Text="SUSPENDED" FontSize="21" FontWeight="Bold" Margin="0,12,0,0"/></StackPanel></Border>
-            <Border Grid.Column="3" Style="{StaticResource Card}"><StackPanel><TextBlock Text="TRANSPORT" Foreground="#FF778A9C"/><TextBlock x:Name="Transport" Text="OFFLINE" FontSize="21" FontWeight="Bold" Margin="0,12,0,0"/></StackPanel></Border>
-        </Grid>
-        <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="1.05*"/><ColumnDefinition Width="1.35*"/></Grid.ColumnDefinitions>
-            <Grid Grid.Column="0" Margin="0,0,14,0">
-                <Grid.RowDefinitions><RowDefinition Height="220"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                <Border Style="{StaticResource Card}" Margin="0,0,0,14">
-                    <Grid><Canvas x:Name="GraphCanvas">
-                        <Ellipse x:Name="HostNode" Width="90" Height="90" Fill="#FF17212B" Stroke="#FF5B6977" StrokeThickness="2" Canvas.Left="55" Canvas.Top="52"/>
-                        <TextBlock Text="WINDOWS" FontWeight="Bold" Canvas.Left="69" Canvas.Top="86"/>
-                        <Line x:Name="TrustLine" X1="145" Y1="97" X2="310" Y2="97" Stroke="#FF3A4652" StrokeThickness="5"/>
-                        <Ellipse x:Name="PhoneNode" Width="90" Height="90" Fill="#FF17212B" Stroke="#FF5B6977" StrokeThickness="2" Canvas.Left="310" Canvas.Top="52"/>
-                        <TextBlock Text="PHONE" FontWeight="Bold" Canvas.Left="332" Canvas.Top="86"/>
-                        <TextBlock x:Name="GraphCaption" Text="NO TRUST SESSION" Foreground="#FF7F91A2" Canvas.Left="155" Canvas.Top="118"/>
-                    </Canvas></Grid>
-                </Border>
-                <Border Grid.Row="1" Style="{StaticResource Card}"><StackPanel>
-                    <TextBlock Text="SECURITY" FontWeight="Bold" FontSize="16"/>
-                    <Grid Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-                        <TextBlock Text="Host identity" Foreground="#FF8192A2"/><TextBlock x:Name="IdentityProvider" Grid.Column="1" HorizontalAlignment="Right"/>
-                        <TextBlock Grid.Row="1" Text="Protocol" Foreground="#FF8192A2" Margin="0,8,0,0"/><TextBlock x:Name="Protocol" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Right" Margin="0,8,0,0"/>
-                        <TextBlock Grid.Row="2" Text="Pair verification" Foreground="#FF8192A2" Margin="0,8,0,0"/><TextBlock x:Name="PairCode" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Right" Margin="0,8,0,0" FontWeight="Bold" Foreground="#FFF2B84B"/>
-                        <TextBlock Grid.Row="3" Text="Phone fingerprint" Foreground="#FF8192A2" Margin="0,8,0,0"/><TextBlock x:Name="PhoneFp" Grid.Row="3" Grid.Column="1" HorizontalAlignment="Right" Margin="0,8,0,0" TextTrimming="CharacterEllipsis" MaxWidth="280"/>
-                    </Grid>
-                    <StackPanel Orientation="Horizontal" Margin="0,18,0,0"><Button x:Name="TpmButton" Content="MIGRATE TO TPM"/><Button x:Name="ProofButton" Content="REQUEST OWNER PROOF"/></StackPanel>
-                </StackPanel></Border>
-            </Grid>
-            <Border Grid.Column="1" Style="{StaticResource Card}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><TextBlock Text="EVENT TIMELINE" FontWeight="Bold" FontSize="16"/><ListBox x:Name="Timeline" Grid.Row="1" Margin="0,12,0,0" Background="Transparent" BorderThickness="0" Foreground="#FFD4DDE6" FontFamily="Consolas" FontSize="12"/></Grid></Border>
-        </Grid>
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,16,0,0"><Button x:Name="PairButton" Content="PAIR PHONE"/><Button x:Name="ConsoleButton" Content="OWNER CONSOLE"/><Button x:Name="DoctorButton" Content="DOCTOR"/><Button x:Name="RefreshButton" Content="REFRESH"/></StackPanel>
-    </Grid>
+param([ValidateSet('Home','Devices','Requests','Settings')][string]$Page='Home',[switch]$Developer)
+$ErrorActionPreference='SilentlyContinue'
+Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase,System.Windows.Forms
+Add-Type -AssemblyName Microsoft.VisualBasic
+$StateDir=Join-Path $env:APPDATA 'ZorinTrust'
+$LocalDir=Join-Path $env:LOCALAPPDATA 'ZorinTrust'
+$Agent=Join-Path $LocalDir 'bin\zorin-host-agent.exe'
+$AppDir=Split-Path -Parent $MyInvocation.MyCommand.Path
+$PairScript=Join-Path $AppDir 'pair-phone.bat'
+function ReadJson($p){if(Test-Path $p){try{return Get-Content -Raw $p|ConvertFrom-Json}catch{}};return $null}
+function UiState(){ $s=ReadJson (Join-Path $StateDir 'ui-state.json'); if($s){return $s}; [pscustomobject]@{device_trusted=$false;owner_present=$false;authority_enabled=$false;transport='Offline';phone_label='Owner phone';phone_fingerprint='';identity_provider='';pair_verification=''} }
+function Events(){ $p=Join-Path $StateDir 'events.jsonl'; if(!(Test-Path $p)){return @()}; $o=@(); foreach($l in @(Get-Content $p -Tail 30)){try{$o+=($l|ConvertFrom-Json)}catch{}};return @($o|Select-Object -Last 12) }
+function Paired(){ $c=ReadJson (Join-Path $StateDir 'config.json'); $r=@(); if($c -and $c.paired_phones){foreach($p in $c.paired_phones.psobject.Properties){$label='Owner phone'; if($c.device_labels -and $c.device_labels.($p.Name)){$label=$c.device_labels.($p.Name)};$r+=[pscustomobject]@{Fingerprint=$p.Name;Label=$label}}};return $r }
+function RunAgent([string[]]$a){if(Test-Path $Agent){& $Agent @a}}
+function OpenPair(){if(Test-Path $PairScript){Start-Process $PairScript}else{[System.Windows.MessageBox]::Show('Pairing launcher was not installed. Run Install.bat from the release bundle.','Zorin Trust')|Out-Null}}
+[xml]$xaml=@'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Zorin Trust" Width="920" Height="620" MinWidth="820" MinHeight="540" WindowStartupLocation="CenterScreen" Background="#101116" Foreground="#F5F5F7" FontFamily="Segoe UI" ShowInTaskbar="True">
+<Window.Resources>
+ <Style TargetType="Button"><Setter Property="Background" Value="#1B1D23"/><Setter Property="Foreground" Value="#F5F5F7"/><Setter Property="BorderBrush" Value="#2A2D35"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="14,9"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="FontSize" Value="13"/></Style>
+ <Style x:Key="Nav" TargetType="Button"><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="14,11"/><Setter Property="Margin" Value="0,2"/></Style>
+ <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="#17191F"/><Setter Property="BorderBrush" Value="#262932"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="14"/><Setter Property="Padding" Value="18"/></Style>
+</Window.Resources>
+<Grid>
+ <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+ <Border Background="#0C0D11" BorderBrush="#22242B" BorderThickness="0,0,1,0"><DockPanel Margin="14,18"><StackPanel DockPanel.Dock="Top"><TextBlock Text="ZORIN TRUST" FontSize="21" FontWeight="SemiBold" Margin="8,0,0,22"/><Button x:Name="NavHome" Style="{StaticResource Nav}" Content="Home"/><Button x:Name="NavDevices" Style="{StaticResource Nav}" Content="Devices"/><Button x:Name="NavRequests" Style="{StaticResource Nav}" Content="Requests"/><Button x:Name="NavSettings" Style="{StaticResource Nav}" Content="Settings"/></StackPanel><StackPanel DockPanel.Dock="Bottom"><TextBlock x:Name="TinyState" Text="Phone disconnected" Foreground="#8B8E98" FontSize="11" Margin="8,8"/></StackPanel></DockPanel></Border>
+ <Grid Grid.Column="1" Margin="30,24,30,28">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+  <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock x:Name="Title" Text="Home" FontSize="28" FontWeight="SemiBold"/><TextBlock x:Name="Subtitle" Text="Your trusted device connection" Foreground="#8B8E98" Margin="0,5,0,0"/></StackPanel><Border Grid.Column="1" Background="#26171A" CornerRadius="18" Padding="14,7" VerticalAlignment="Center"><TextBlock x:Name="Badge" Text="OFFLINE" Foreground="#F04B5F" FontWeight="SemiBold"/></Border></Grid>
+  <Grid Grid.Row="1" Margin="0,24,0,0">
+   <Grid x:Name="HomePage"><Grid.RowDefinitions><RowDefinition Height="230"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <Border Style="{StaticResource Card}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition/></Grid.ColumnDefinitions><Grid><Ellipse x:Name="RingOuter" Width="150" Height="150" Stroke="#343741" StrokeThickness="9"/><Ellipse x:Name="Ring" Width="150" Height="150" Stroke="#F04B5F" StrokeThickness="9"/><StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock x:Name="RingTitle" Text="OFFLINE" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"/><TextBlock x:Name="RingSub" Text="Phone disconnected" Foreground="#8B8E98" FontSize="11" HorizontalAlignment="Center" Margin="0,5,0,0"/></StackPanel></Grid><StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="18,0,0,0"><TextBlock x:Name="DeviceName" Text="Owner phone" FontSize="22" FontWeight="SemiBold"/><TextBlock x:Name="MainLine" Text="Not connected" FontSize="15" Margin="0,8,0,0"/><TextBlock x:Name="HelpLine" Text="Connect your phone by USB to establish trust." Foreground="#9A9DA7" Margin="0,7,0,18" TextWrapping="Wrap"/><StackPanel Orientation="Horizontal"><Button x:Name="PairBtn" Content="Pair phone"/><Button x:Name="OpenDevicesBtn" Content="Manage devices"/></StackPanel></StackPanel></Grid></Border>
+    <Grid Grid.Row="1" Margin="0,16,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Border Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="Recent activity" FontWeight="SemiBold" FontSize="16"/><ListBox x:Name="Recent" Background="Transparent" BorderThickness="0" Foreground="#D8DAE0" Margin="0,12,0,0"/></StackPanel></Border><Border Grid.Column="1" Style="{StaticResource Card}" Margin="8,0,0,0"><StackPanel><TextBlock Text="Sensitive actions" FontWeight="SemiBold" FontSize="16"/><TextBlock x:Name="ActionText" Text="Unavailable while the phone is offline." Foreground="#9A9DA7" TextWrapping="Wrap" Margin="0,12,0,16"/><Button x:Name="ProofBtn" Content="Authorize this workstation" HorizontalAlignment="Left"/></StackPanel></Border></Grid>
+   </Grid>
+   <Grid x:Name="DevicesPage" Visibility="Collapsed"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><TextBlock Text="Trusted devices can establish an owner session without pairing again." Foreground="#9A9DA7" TextWrapping="Wrap"/><ListBox x:Name="DeviceList" Grid.Row="1" Margin="0,18,0,0" Background="Transparent" BorderThickness="0"/></Grid>
+   <Grid x:Name="RequestsPage" Visibility="Collapsed"><Border Style="{StaticResource Card}" VerticalAlignment="Top"><StackPanel><TextBlock Text="No pending requests" FontSize="20" FontWeight="SemiBold"/><TextBlock Text="SSH, admin and credential approvals will appear here when a trusted application asks for them." Foreground="#9A9DA7" Margin="0,8,0,0" TextWrapping="Wrap"/></StackPanel></Border></Grid>
+   <Grid x:Name="SettingsPage" Visibility="Collapsed"><StackPanel><Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="General" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="Zorin Trust runs quietly in the background. The tray icon is the normal entry point." Foreground="#9A9DA7" Margin="0,8,0,14" TextWrapping="Wrap"/><Button x:Name="OpenStartup" Content="Open startup settings" HorizontalAlignment="Left"/></StackPanel></Border><Border x:Name="DeveloperCard" Style="{StaticResource Card}" Margin="0,16,0,0" Visibility="Collapsed"><StackPanel><TextBlock Text="Developer mode" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="Internal transport, fingerprints and diagnostics. Hidden during normal use." Foreground="#9A9DA7" Margin="0,8,0,12"/><TextBlock x:Name="DevText" FontFamily="Consolas" FontSize="11" TextWrapping="Wrap"/><StackPanel Orientation="Horizontal" Margin="0,12,0,0"><Button x:Name="DoctorBtn" Content="Doctor"/><Button x:Name="StatusBtn" Content="Raw status"/></StackPanel></StackPanel></Border></StackPanel></Grid>
+  </Grid>
+ </Grid>
+</Grid>
 </Window>
 '@
-$reader = New-Object System.Xml.XmlNodeReader $xaml
-$Window = [Windows.Markup.XamlReader]::Load($reader)
-$names=@('OverallBadge','DeviceTrust','OwnerPresence','Authority','Transport','TrustLine','HostNode','PhoneNode','GraphCaption','IdentityProvider','Protocol','PairCode','PhoneFp','Timeline','PairButton','ConsoleButton','DoctorButton','RefreshButton','TpmButton','ProofButton')
-foreach($n in $names){Set-Variable -Name $n -Value $Window.FindName($n) -Scope Script}
-
-function Update-Ui {
-    $s=Get-TrustState
-    Set-StateText $DeviceTrust ($(if($s.Trusted){'ACTIVE'}else{'OFFLINE'})) $(if($s.Trusted){'good'}else{'dim'})
-    Set-StateText $OwnerPresence ($(if($s.Present){'PRESENT'}else{'LOCKED'})) $(if($s.Present){'good'}else{'warn'})
-    Set-StateText $Authority ($(if($s.Authority){'ENABLED'}else{'SUSPENDED'})) $(if($s.Authority){'good'}else{'warn'})
-    Set-StateText $Transport $s.TransportText $(if($s.Transport){'good'}elseif($s.TransportText -eq 'RECOVERING'){'warn'}else{'dim'})
-    if($s.Trusted){$OverallBadge.Text=if($s.Present){'OWNER LINKED'}else{'DEVICE TRUST'};$OverallBadge.Foreground='#FFF04B5F';$TrustLine.Stroke='#FFF04B5F';$HostNode.Stroke='#FFF04B5F';$PhoneNode.Stroke='#FFF04B5F';$GraphCaption.Text=if($s.Present){'MUTUAL TRUST + OWNER PRESENT'}else{'DEVICE TRUST / OWNER LOCKED'}}else{$OverallBadge.Text=if($s.Transport){'AUTHENTICATING'}else{'OFFLINE'};$OverallBadge.Foreground='#FF93A3B2';$TrustLine.Stroke='#FF3A4652';$HostNode.Stroke='#FF5B6977';$PhoneNode.Stroke='#FF5B6977';$GraphCaption.Text=if($s.Transport){'USB CONNECTED / WAITING FOR TRUST'}else{'NO TRUST SESSION'}}
-    $IdentityProvider.Text=[string]$s.Host.identity_provider;$Protocol.Text=[string]$s.Host.protocol;$PairCode.Text=[string]$s.Host.pair_verification;$PhoneFp.Text=if($s.Phone){$s.Phone}else{'—'}
-    $Timeline.Items.Clear();$ev=Last-Events 60;[array]::Reverse($ev);foreach($e in $ev){$t='';try{$t=(Get-Date $e.time).ToString('HH:mm:ss')}catch{};$detail=if($e.detail){'  '+$e.detail}else{''};[void]$Timeline.Items.Add(('{0}  {1}{2}' -f $t,$e.title,$detail))}
-}
-function Start-Terminal([string]$Command) { Start-Process powershell.exe -ArgumentList '-NoExit','-ExecutionPolicy','Bypass','-Command',$Command }
-$RefreshButton.Add_Click({Update-Ui})
-$DoctorButton.Add_Click({if(Test-Path $Agent){Start-Terminal ('& "{0}" doctor' -f $Agent)}})
-$ConsoleButton.Add_Click({if(Test-Path $Agent){Start-Terminal ('& "{0}" gate --action owner.console --resource local:owner-console -- powershell.exe' -f $Agent)}})
-$ProofButton.Add_Click({if(Test-Path $Agent){Start-Terminal ('& "{0}" authorize --action owner.session --resource local:trust-center' -f $Agent)}})
-$TpmButton.Add_Click({if($BundleRoot -and (Test-Path (Join-Path $BundleRoot '9-MIGRATE-HOST-TO-TPM.bat'))){Start-Process (Join-Path $BundleRoot '9-MIGRATE-HOST-TO-TPM.bat')}elseif(Test-Path $Agent){Start-Terminal ('& "{0}" identity migrate-tpm' -f $Agent)}})
-$PairButton.Add_Click({if($BundleRoot -and (Test-Path (Join-Path $BundleRoot '2-PAIR-OWNER.bat'))){Start-Process (Join-Path $BundleRoot '2-PAIR-OWNER.bat')}else{[System.Windows.MessageBox]::Show('Open the v0.4 bundle and run 2-PAIR-OWNER.bat for an explicit pairing ceremony.','Zorin Trust')|Out-Null}})
-
-$timer=New-Object Windows.Threading.DispatcherTimer;$timer.Interval=[TimeSpan]::FromSeconds(1);$timer.Add_Tick({Update-Ui});$timer.Start();Update-Ui
-$notify=$null
-if($Tray){
-    $notify=New-Object System.Windows.Forms.NotifyIcon;$notify.Icon=[System.Drawing.SystemIcons]::Shield;$notify.Text='Zorin Trust Center';$notify.Visible=$true
-    $menu=New-Object System.Windows.Forms.ContextMenuStrip;$open=$menu.Items.Add('Open Trust Center');$exit=$menu.Items.Add('Exit');$open.Add_Click({$Window.Show();$Window.Activate()});$exit.Add_Click({$notify.Visible=$false;$timer.Stop();$Window.Tag='exit';$Window.Close()});$notify.ContextMenuStrip=$menu;$notify.Add_DoubleClick({$Window.Show();$Window.Activate()})
-    $Window.Add_Closing({param($sender,$e) if($Window.Tag -ne 'exit'){$e.Cancel=$true;$Window.Hide()}})
-}
-[void]$Window.ShowDialog();if($notify){$notify.Visible=$false;$notify.Dispose()}
+$Window=[Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
+$N=@('NavHome','NavDevices','NavRequests','NavSettings','TinyState','Title','Subtitle','Badge','HomePage','DevicesPage','RequestsPage','SettingsPage','Ring','RingTitle','RingSub','DeviceName','MainLine','HelpLine','PairBtn','OpenDevicesBtn','Recent','ActionText','ProofBtn','DeviceList','OpenStartup','DeveloperCard','DevText','DoctorBtn','StatusBtn');foreach($n in $N){Set-Variable $n $Window.FindName($n)}
+$script:dev=$Developer.IsPresent
+function ShowPage($p){$HomePage.Visibility='Collapsed';$DevicesPage.Visibility='Collapsed';$RequestsPage.Visibility='Collapsed';$SettingsPage.Visibility='Collapsed';switch($p){'Home'{$HomePage.Visibility='Visible';$Title.Text='Home';$Subtitle.Text='Your trusted device connection'}'Devices'{$DevicesPage.Visibility='Visible';$Title.Text='Devices';$Subtitle.Text='Manage trusted phones';RefreshDevices}'Requests'{$RequestsPage.Visibility='Visible';$Title.Text='Requests';$Subtitle.Text='Approvals that need you'}'Settings'{$SettingsPage.Visibility='Visible';$Title.Text='Settings';$Subtitle.Text='Keep Trust quiet and secure'}};$DeveloperCard.Visibility=if($script:dev){'Visible'}else{'Collapsed'}}
+function RefreshDevices(){ $DeviceList.Items.Clear(); foreach($d in Paired){$panel=New-Object System.Windows.Controls.Border;$panel.Background='#17191F';$panel.BorderBrush='#262932';$panel.BorderThickness=1;$panel.CornerRadius=12;$panel.Padding=14;$panel.Margin='0,0,0,10';$g=New-Object System.Windows.Controls.Grid;$c1=New-Object System.Windows.Controls.ColumnDefinition;$c2=New-Object System.Windows.Controls.ColumnDefinition;$c2.Width='Auto';$g.ColumnDefinitions.Add($c1);$g.ColumnDefinitions.Add($c2);$sp=New-Object System.Windows.Controls.StackPanel;$t=New-Object System.Windows.Controls.TextBlock;$t.Text=$d.Label;$t.FontSize=16;$t.FontWeight='SemiBold';$fp=New-Object System.Windows.Controls.TextBlock;$fp.Text=('ID '+$d.Fingerprint.Substring(0,[Math]::Min(14,$d.Fingerprint.Length))+'…');$fp.Foreground='#8B8E98';$fp.FontSize=11;$fp.Margin='0,5,0,0';$sp.Children.Add($t)|Out-Null;$sp.Children.Add($fp)|Out-Null;$buttons=New-Object System.Windows.Controls.StackPanel;$buttons.Orientation='Horizontal';[System.Windows.Controls.Grid]::SetColumn($buttons,1);$rn=New-Object System.Windows.Controls.Button;$rn.Content='Rename';$rv=New-Object System.Windows.Controls.Button;$rv.Content='Revoke';$x=$d;$rn.Add_Click({$name=[Microsoft.VisualBasic.Interaction]::InputBox('Device name','Zorin Trust',$x.Label);if($name){RunAgent @('device','rename','--fingerprint',$x.Fingerprint,'--name',$name)|Out-Null;RefreshDevices}}.GetNewClosure());$rv.Add_Click({if([System.Windows.MessageBox]::Show('Revoke trust for '+$x.Label+'?','Zorin Trust','YesNo','Warning') -eq 'Yes'){RunAgent @('device','revoke','--fingerprint',$x.Fingerprint)|Out-Null;RefreshDevices}}.GetNewClosure());$buttons.Children.Add($rn)|Out-Null;$buttons.Children.Add($rv)|Out-Null;$g.Children.Add($sp)|Out-Null;$g.Children.Add($buttons)|Out-Null;$panel.Child=$g;$DeviceList.Items.Add($panel)|Out-Null} }
+function Refresh(){ $s=UiState; if($s.device_trusted -and $s.owner_present){$Badge.Text='OWNER VERIFIED';$Ring.Stroke='#F04B5F';$RingTitle.Text='TRUSTED';$RingSub.Text='Owner present';$TinyState.Text='Owner verified';$MainLine.Text='Owner verified';$HelpLine.Text='Sensitive actions are available from this workstation.';$ActionText.Text='Your phone is unlocked. This workstation may request short-lived owner authorization.';$ProofBtn.IsEnabled=$true}elseif($s.device_trusted){$Badge.Text='DEVICE TRUSTED';$Ring.Stroke='#C69245';$RingTitle.Text='TRUSTED';$RingSub.Text='Phone locked';$TinyState.Text='Device trusted · phone locked';$MainLine.Text='Device trusted';$HelpLine.Text='Unlock your phone when a sensitive action needs approval.';$ActionText.Text='Sensitive actions are paused until the phone is unlocked.';$ProofBtn.IsEnabled=$false}elseif($s.transport -eq 'Recovering'){$Badge.Text='CONNECTING';$Ring.Stroke='#6F727C';$RingTitle.Text='CONNECTING';$RingSub.Text='Restoring secure link';$TinyState.Text='Connecting…';$MainLine.Text='Connecting';$HelpLine.Text='Restoring the trusted USB session.';$ProofBtn.IsEnabled=$false}else{$Badge.Text='OFFLINE';$Ring.Stroke='#343741';$RingTitle.Text='OFFLINE';$RingSub.Text='Phone disconnected';$TinyState.Text='Phone disconnected';$MainLine.Text='Not connected';$HelpLine.Text='Connect your phone by USB to establish trust.';$ProofBtn.IsEnabled=$false};if($s.phone_label){$DeviceName.Text=$s.phone_label};$Recent.Items.Clear();foreach($e in @(Events|Sort-Object time -Descending|Select-Object -First 6)){try{$tm=(Get-Date $e.time).ToString('HH:mm');$Recent.Items.Add("$tm   $($e.title)")|Out-Null}catch{}};$DevText.Text="Host key: $($s.identity_provider)`nHost FP: $($s.host_fingerprint)`nPhone FP: $($s.phone_fingerprint)`nTransport: $($s.transport)`nPair: $($s.pair_verification)" }
+$NavHome.Add_Click({ShowPage 'Home'});$NavDevices.Add_Click({ShowPage 'Devices'});$NavRequests.Add_Click({ShowPage 'Requests'});$NavSettings.Add_Click({ShowPage 'Settings'});$OpenDevicesBtn.Add_Click({ShowPage 'Devices'});$PairBtn.Add_Click({OpenPair});$ProofBtn.Add_Click({if(Test-Path $Agent){Start-Process powershell.exe -ArgumentList '-NoExit','-Command',"& '$Agent' authorize --action owner.session --resource workstation --ttl 30"}});$OpenStartup.Add_Click({Start-Process 'ms-settings:startupapps'});$DoctorBtn.Add_Click({if(Test-Path $Agent){Start-Process powershell.exe -ArgumentList '-NoExit','-Command',"& '$Agent' doctor"}});$StatusBtn.Add_Click({if(Test-Path $Agent){Start-Process powershell.exe -ArgumentList '-NoExit','-Command',"& '$Agent' status"}})
+$Window.Add_KeyDown({param($s,$e) if($e.Key -eq 'D' -and [System.Windows.Input.Keyboard]::Modifiers.HasFlag([System.Windows.Input.ModifierKeys]::Control) -and [System.Windows.Input.Keyboard]::Modifiers.HasFlag([System.Windows.Input.ModifierKeys]::Shift)){$script:dev=-not $script:dev;$DeveloperCard.Visibility=if($script:dev){'Visible'}else{'Collapsed'}}})
+$timer=New-Object Windows.Threading.DispatcherTimer;$timer.Interval=[TimeSpan]::FromSeconds(1);$timer.Add_Tick({Refresh});$timer.Start();ShowPage $Page;Refresh;[void]$Window.ShowDialog()

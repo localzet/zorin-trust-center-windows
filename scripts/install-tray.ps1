@@ -1,14 +1,15 @@
 $ErrorActionPreference='Stop'
-$Src=Split-Path -Parent $MyInvocation.MyCommand.Path
-$Dst=Join-Path $env:LOCALAPPDATA 'ZorinTrust\ui'
-New-Item -ItemType Directory -Force -Path $Dst|Out-Null
-Copy-Item (Join-Path $Src 'trust-center.ps1') (Join-Path $Dst 'trust-center.ps1') -Force
-$Task='ZorinTrustCenterTray'
-$PowerShell=(Get-Command powershell.exe).Source
-$Arg="-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Dst\trust-center.ps1`" -Tray"
-$Action=New-ScheduledTaskAction -Execute $PowerShell -Argument $Arg
-$Trigger=New-ScheduledTaskTrigger -AtLogOn
-$Principal=New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-Register-ScheduledTask -TaskName $Task -Action $Action -Trigger $Trigger -Principal $Principal -Force|Out-Null
-Start-ScheduledTask -TaskName $Task
-Write-Host "Trust Center tray installed: $Task" -ForegroundColor Green
+$src=Split-Path -Parent $MyInvocation.MyCommand.Path
+$dst=Join-Path $env:LOCALAPPDATA 'ZorinTrust\ui'
+New-Item -ItemType Directory -Force -Path $dst|Out-Null
+Copy-Item (Join-Path $src 'trust-center.ps1') $dst -Force
+$arch=$env:PROCESSOR_ARCHITECTURE; $tray=if($arch -eq 'ARM64'){'ZorinTrustTray-windows-arm64.exe'}else{'ZorinTrustTray-windows-amd64.exe'}
+Copy-Item (Join-Path $src ('..\build\'+$tray)) (Join-Path $dst 'ZorinTrustTray.exe') -Force
+Copy-Item (Join-Path $src '..\assets\zorin-trust.ico') $dst -Force
+if(Test-Path (Join-Path $src 'pair-phone.bat')){Copy-Item (Join-Path $src 'pair-phone.bat') $dst -Force}
+$exe=Join-Path $dst 'ZorinTrustTray.exe'
+$task='ZorinTrustTray'
+& schtasks.exe /Delete /TN $task /F 2>$null|Out-Null
+& schtasks.exe /Create /TN $task /SC ONLOGON /TR ('"'+$exe+'"') /RL LIMITED /F|Out-Null
+Start-Process $exe
+Write-Host "Zorin Trust tray installed: $exe"
