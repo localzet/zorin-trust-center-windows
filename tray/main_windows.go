@@ -31,12 +31,15 @@ const (
 	IMAGE_ICON           = 1
 	LR_LOADFROMFILE      = 0x0010
 	MF_STRING            = 0x00000000
+	MF_SEPARATOR         = 0x00000800
 	TPM_RIGHTBUTTON      = 0x0002
 	TPM_BOTTOMALIGN      = 0x0020
 	SW_SHOWNORMAL        = 1
 	IDC_OPEN             = 1001
 	IDC_PAIR             = 1002
 	IDC_EXIT             = 1003
+	NIN_SELECT           = WM_USER + 0
+	NIN_KEYSELECT        = WM_USER + 1
 	trayMessage          = WM_USER + 17
 )
 
@@ -103,6 +106,7 @@ var (
 	pAppendMenu            = user32.NewProc("AppendMenuW")
 	pTrackPopupMenu        = user32.NewProc("TrackPopupMenu")
 	pDestroyMenu           = user32.NewProc("DestroyMenu")
+	pShellExecute          = shell32.NewProc("ShellExecuteW")
 	pGetCursorPos          = user32.NewProc("GetCursorPos")
 	pSetForegroundWindow   = user32.NewProc("SetForegroundWindow")
 	pGetModuleHandle       = kernel32.NewProc("GetModuleHandleW")
@@ -112,7 +116,7 @@ var (
 
 var hwnd uintptr
 var nid notifyIconData
-var uiScript, pairScript, statePath string
+var pairScript, statePath string
 var taskbarCreated uint32
 
 func u16(s string) *uint16 { p, _ := syscall.UTF16PtrFromString(s); return p }
@@ -124,13 +128,11 @@ func copyTip(dst []uint16, s string) {
 	copy(dst, x)
 }
 
-func openPowerShell(script string) {
-	if script == "" {
-		return
-	}
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: false}
-	_ = cmd.Start()
+func openOps() {
+	// Use ShellExecute rather than a script so a tray click is a direct user action.
+	verb := u16("open")
+	url := u16("http://127.0.0.1:47474/")
+	pShellExecute.Call(0, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(url)), 0, 0, SW_SHOWNORMAL)
 }
 func openPair() {
 	if pairScript == "" {
@@ -157,9 +159,13 @@ func wndProc(h uintptr, m uint32, w, l uintptr) uintptr {
 	}
 	switch m {
 	case trayMessage:
-		switch uint32(l) {
-		case WM_LBUTTONUP, WM_LBUTTONDBLCLK:
-			openPowerShell(uiScript)
+		// With NOTIFYICON_VERSION_4 the event is in LOWORD(lParam) and the
+		// icon id occupies HIWORD(lParam). Comparing the full lParam was the
+		// reason left-clicks in v0.5.x appeared to do nothing.
+		event := uint32(l & 0xffff)
+		switch event {
+		case WM_LBUTTONUP, WM_LBUTTONDBLCLK, NIN_SELECT, NIN_KEYSELECT:
+			openOps()
 			return 0
 		case WM_RBUTTONUP:
 			showMenu()
@@ -168,7 +174,7 @@ func wndProc(h uintptr, m uint32, w, l uintptr) uintptr {
 	case WM_COMMAND:
 		switch int(w & 0xffff) {
 		case IDC_OPEN:
-			openPowerShell(uiScript)
+			openOps()
 		case IDC_PAIR:
 			openPair()
 		case IDC_EXIT:
@@ -191,8 +197,10 @@ func showMenu() {
 		return
 	}
 	defer pDestroyMenu.Call(menu)
-	pAppendMenu.Call(menu, MF_STRING, IDC_OPEN, uintptr(unsafe.Pointer(u16("Open Zorin Trust"))))
+	pAppendMenu.Call(menu, MF_STRING, IDC_OPEN, uintptr(unsafe.Pointer(u16("Open Zorin Ops"))))
+	pAppendMenu.Call(menu, MF_SEPARATOR, 0, 0)
 	pAppendMenu.Call(menu, MF_STRING, IDC_PAIR, uintptr(unsafe.Pointer(u16("Pair phone"))))
+	pAppendMenu.Call(menu, MF_SEPARATOR, 0, 0)
 	pAppendMenu.Call(menu, MF_STRING, IDC_EXIT, uintptr(unsafe.Pointer(u16("Exit tray"))))
 	var pt point
 	pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
@@ -227,7 +235,7 @@ func updateTip() {
 
 func main() {
 	// Keep one tray instance per interactive Windows session.
-	mutexName := u16(`Local\ZorinTrustTray-v0.5`)
+	mutexName := u16(`Local\ZorinTrustTray-v0.6`)
 	hMutex, _, mutexErr := pCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
 	if hMutex == 0 {
 		return
@@ -240,7 +248,6 @@ func main() {
 
 	exe, _ := os.Executable()
 	dir := filepath.Dir(exe)
-	uiScript = filepath.Join(dir, "trust-center.ps1")
 	pairScript = filepath.Join(dir, "pair-phone.bat")
 	if appdata := os.Getenv("APPDATA"); appdata != "" {
 		statePath = filepath.Join(appdata, "ZorinTrust", "ui-state.json")
