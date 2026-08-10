@@ -1,0 +1,10 @@
+name: syntax
+on: [push, pull_request]
+jobs:
+  basic:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: powershell
+        run: |
+          $errors=$null; [void][System.Management.Automation.Language.Parser]::ParseFile("scripts/trust-center.ps1",[ref]$null,[ref]$errors); if($errors.Count){$errors|Out-String|Write-Error;exit 1}
