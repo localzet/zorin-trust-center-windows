@@ -370,8 +370,8 @@ Where-Object {
 }
 )
 if($Leftovers.Count -gt 0) {
-    Write-Warning "Legacy Zorin Trust task(s) still present: $($Leftovers.TaskName -join ', '). They are not used by 0.9.2; run 6-STARTUP-DOCTOR.bat for details."
+    Write-Warning "Legacy Zorin Trust task(s) still present: $($Leftovers.TaskName -join ', '). They are not used by 0.9.3; run 6-STARTUP-DOCTOR.bat for details."
 }
-Write-Host 'Zorin Trust 0.9.2 installed. Silent bootstrap is running.' -ForegroundColor Green
+Write-Host 'Zorin Trust 0.9.3 installed. Silent bootstrap is running.' -ForegroundColor Green
 Write-Host 'Left-click the tray icon to open the native Trust Center; Zorin Ops remains the infrastructure control plane.'
 Write-Host 'Lock-on-trust-loss is opt-in and disabled until you enable it in Trust Center.'

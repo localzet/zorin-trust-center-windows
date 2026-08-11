@@ -13,3 +13,9 @@ Native Windows integration for Zorin Trust.
 - Existing console-free bootstrap and startup supervision are retained.
 
 The lock-on-loss feature is disabled by default. It uses the standard Windows workstation lock operation and never attempts to bypass the normal Windows unlock/sign-in path.
+
+## 0.9.3 maintenance
+
+- Fixes Windows PowerShell 5.1 multiline pipeline syntax in the startup doctor.
+- Adds a portable source check for formatter regressions that can be executed in non-Windows build environments.
+- The installer still performs the authoritative `System.Management.Automation.Language.Parser` pass over the complete release bundle before changing the system.

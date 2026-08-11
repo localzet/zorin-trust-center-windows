@@ -1,14 +1,17 @@
 $ErrorActionPreference='Continue'
 $Local=Join-Path $env:LOCALAPPDATA 'ZorinTrust'
 $Logs=Join-Path $Local 'logs'
-Write-Host 'Zorin Trust 0.9.2 startup doctor' -ForegroundColor Cyan
+Write-Host 'Zorin Trust 0.9.3 startup doctor' -ForegroundColor Cyan
 Write-Host "Local root: $Local"
 Write-Host ''
 Write-Host 'Scheduled tasks:' -ForegroundColor Yellow
-$tasks=@(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
-    $_.TaskName -like 'ZorinTrust*'
-}
-| Sort-Object TaskName)
+$tasks = @(
+    Get-ScheduledTask -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.TaskName -like 'ZorinTrust*'
+        } |
+        Sort-Object TaskName
+)
 if($tasks.Count -eq 0) {
     Write-Host '  NONE' -ForegroundColor Red
 }
