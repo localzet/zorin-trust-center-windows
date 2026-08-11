@@ -150,7 +150,7 @@ var (
 )
 
 func main() {
-	mutexName := utf16(`Local\ZorinTrustTray-v0.9.3`)
+	mutexName := utf16(`Local\ZorinTrustTray-v0.10.0`)
 	mutex, _, mutexErr := createMutex.Call(
 		0,
 		0,

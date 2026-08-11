@@ -74,7 +74,7 @@ if([string]::IsNullOrWhiteSpace($AdbPath)) {
 }
 foreach($tool in @('ssh', 'ssh-keygen', 'scp')) {
     if(-not(Get-Command $tool -ErrorAction SilentlyContinue)) {
-        throw "OpenSSH $tool was not found in PATH. Install the Windows OpenSSH Client optional feature before using Zorin Trust 0.9."
+        throw "OpenSSH $tool was not found in PATH. Install the Windows OpenSSH Client optional feature before using Zorin Trust 0.10."
     }
 }
 $Architecture = if($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
@@ -94,8 +94,8 @@ $PairSource = Join-Path $Here 'app\installer\pair-phone.ps1'
 $SigningScript = Join-Path $Here 'host\runtime-signing.ps1'
 $NodeAMD64Source = Join-Path $Here 'node\zorin-node-linux-amd64'
 $NodeARM64Source = Join-Path $Here 'node\zorin-node-linux-arm64'
-$UnsignedRuntime = Join-Path $Here 'app\runtime\Zorin-Trust-Runtime-v8.1.0-unsigned.apk'
-$SignedRuntime = Join-Path $Artifacts 'Zorin-Trust-Runtime-v8.1.0-owner-signed.apk'
+$UnsignedRuntime = Join-Path $Here 'app\runtime\Zorin-Trust-Runtime-v8.2.0-unsigned.apk'
+$SignedRuntime = Join-Path $Artifacts 'Zorin-Trust-Runtime-v8.2.0-owner-signed.apk'
 $Required = @(
 $HostSource,
 $OpsSource,
@@ -147,7 +147,7 @@ if($Devices.Count -eq 1) {
     }
     catch {
     }
-    Write-Host 'Android Runtime 8.1.0 updated with your existing local signer.' -ForegroundColor Green
+    Write-Host 'Android Runtime 8.2.0 updated with your existing local signer.' -ForegroundColor Green
 }
 else {
     Write-Warning "Phone Runtime not updated now (authorized adb devices: $($Devices.Count)). Run 0-INSTALL-OR-UPDATE.bat again with exactly one phone connected."
@@ -370,8 +370,8 @@ Where-Object {
 }
 )
 if($Leftovers.Count -gt 0) {
-    Write-Warning "Legacy Zorin Trust task(s) still present: $($Leftovers.TaskName -join ', '). They are not used by 0.9.3; run 6-STARTUP-DOCTOR.bat for details."
+    Write-Warning "Legacy Zorin Trust task(s) still present: $($Leftovers.TaskName -join ', '). They are not used by 0.10.0; run 6-STARTUP-DOCTOR.bat for details."
 }
-Write-Host 'Zorin Trust 0.9.3 installed. Silent bootstrap is running.' -ForegroundColor Green
+Write-Host 'Zorin Trust 0.10.0 installed. Silent bootstrap is running.' -ForegroundColor Green
 Write-Host 'Left-click the tray icon to open the native Trust Center; Zorin Ops remains the infrastructure control plane.'
 Write-Host 'Lock-on-trust-loss is opt-in and disabled until you enable it in Trust Center.'

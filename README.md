@@ -14,8 +14,11 @@ Native Windows integration for Zorin Trust.
 
 The lock-on-loss feature is disabled by default. It uses the standard Windows workstation lock operation and never attempts to bypass the normal Windows unlock/sign-in path.
 
-## 0.9.3 maintenance
+## 0.10 — Portable Owner Key foundation
 
-- Fixes Windows PowerShell 5.1 multiline pipeline syntax in the startup doctor.
-- Adds a portable source check for formatter regressions that can be executed in non-Windows build environments.
-- The installer still performs the authoritative `System.Management.Automation.Language.Parser` pass over the complete release bundle before changing the system.
+- Ships Android Runtime 8.2.0 with the first transport-independent `ZTRUST/2` connection path.
+- Adds a one-shot portable launcher that starts the Host Agent with a memory-only identity and no Task Scheduler/service installation.
+- Keeps the normal owner workstation on the proven silent bootstrap + ADB/USB path.
+- Preserves the complete Windows PowerShell parser pass before the installer changes the system.
+
+The portable launcher intentionally uses a visible console because it shows private-LAN bootstrap URLs, the temporary host fingerprint and the pair-verification code. Closing that console ends the portable identity.
