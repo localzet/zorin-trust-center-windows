@@ -10,13 +10,18 @@ $Bin = Join-Path $Local 'bin'
 $Ui = Join-Path $Local 'ui'
 $Artifacts = Join-Path $Local 'artifacts'
 $Logs = Join-Path $Local 'logs'
-New-Item -ItemType Directory -Force -Path $State,$Bin,$Ui,$Artifacts,$Logs | Out-Null
+$NodeDir = Join-Path $Local 'node'
+New-Item -ItemType Directory -Force -Path $State,$Bin,$Ui,$Artifacts,$Logs,$NodeDir | Out-Null
 
 $adb = Get-Command adb.exe -ErrorAction SilentlyContinue
 if (-not $adb) { $adb = Get-Command adb -ErrorAction SilentlyContinue }
 if (-not $adb) { throw 'adb not found. Install Android Platform Tools and add adb to PATH.' }
 $AdbPath = if ($adb.Source) { $adb.Source } else { $adb.Path }
 if ([string]::IsNullOrWhiteSpace($AdbPath)) { throw 'adb executable path could not be resolved.' }
+
+foreach($tool in @('ssh','ssh-keygen','scp')){
+  if(-not(Get-Command $tool -ErrorAction SilentlyContinue)){ throw "OpenSSH $tool was not found in PATH. Install the Windows OpenSSH Client optional feature before using Zorin Trust 0.8." }
+}
 
 $arch = $env:PROCESSOR_ARCHITECTURE
 $A = if ($arch -eq 'ARM64') { 'arm64' } else { 'amd64' }
@@ -28,12 +33,14 @@ $BootstrapSource = Join-Path $Here "app\ZorinTrustBootstrap-windows-$A.exe"
 $IconSource = Join-Path $Here 'app\zorin-trust.ico'
 $PairSource = Join-Path $Here 'app\installer\pair-phone.ps1'
 $SigningScript = Join-Path $Here 'host\runtime-signing.ps1'
+$NodeAMD64Source = Join-Path $Here 'node\zorin-node-linux-amd64'
+$NodeARM64Source = Join-Path $Here 'node\zorin-node-linux-arm64'
 $Unsigned = Join-Path $Here 'app\runtime\Zorin-Trust-Runtime-v8.1.0-unsigned.apk'
 $Signed = Join-Path $Artifacts 'Zorin-Trust-Runtime-v8.1.0-owner-signed.apk'
-$Required = @($HostSource,$OpsSource,$AuthoritySource,$TraySource,$BootstrapSource,$IconSource,$PairSource,$SigningScript,$Unsigned)
+$Required = @($HostSource,$OpsSource,$AuthoritySource,$TraySource,$BootstrapSource,$IconSource,$PairSource,$SigningScript,$Unsigned,$NodeAMD64Source,$NodeARM64Source)
 foreach($p in $Required){if(-not(Test-Path -LiteralPath $p)){throw "Release bundle is incomplete. Missing: $p"}}
 
-# Preserve the existing owner-managed signer. Ordinary v0.7 upgrades never migrate/unpair.
+# Preserve the existing owner-managed signer. Ordinary v0.8 upgrades never migrate/unpair.
 . $SigningScript
 Sign-ZorinRuntime $Unsigned $Signed | Out-Null
 if(-not(Test-Path -LiteralPath $Signed)){throw 'Runtime signing reported success but no signed APK was produced.'}
@@ -86,6 +93,8 @@ $Bootstrap=Join-Path $Ui 'ZorinTrustBootstrap.exe'
 Copy-Item $HostSource $Agent -Force
 Copy-Item $OpsSource $Ops -Force
 Copy-Item $AuthoritySource $Authority -Force
+Copy-Item $NodeAMD64Source (Join-Path $NodeDir 'zorin-node-linux-amd64') -Force
+Copy-Item $NodeARM64Source (Join-Path $NodeDir 'zorin-node-linux-arm64') -Force
 Copy-Item $TraySource $Tray -Force
 Copy-Item $BootstrapSource $Bootstrap -Force
 Copy-Item $IconSource (Join-Path $Ui 'zorin-trust.ico') -Force
@@ -151,9 +160,9 @@ if(-not(Test-LocalTcp 47472) -or -not(Test-LocalHttp 'http://127.0.0.1:47474/api
 # install solely because Windows retained an inert legacy task; report it loudly.
 $leftovers=@(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'ZorinTrust*' -and $_.TaskName -ne 'ZorinTrustBootstrap' })
 if($leftovers.Count -gt 0){
-  Write-Warning "Legacy Zorin Trust task(s) still present: $($leftovers.TaskName -join ', '). They are not used by 0.7.2; run 6-STARTUP-DOCTOR.bat for details."
+  Write-Warning "Legacy Zorin Trust task(s) still present: $($leftovers.TaskName -join ', '). They are not used by 0.8.0; run 6-STARTUP-DOCTOR.bat for details."
 }
 
-Write-Host "Zorin Trust 0.7.2 installed. Silent bootstrap is running." -ForegroundColor Green
-Write-Host 'Background services now run through the console-free native bootstrap. The tray opens Ops only after its local HTTP endpoint is healthy.'
+Write-Host "Zorin Trust 0.8.0 installed. Silent bootstrap is running." -ForegroundColor Green
+Write-Host 'Background services run through the console-free native bootstrap. Zorin Ops 0.3 and Authority 0.3 provide short-lived SSH certificate mode.'
 Write-Host 'Raw diagnostics are under tools\developer; they are not part of the normal UI.'

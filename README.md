@@ -1,4 +1,4 @@
-# Zorin Trust Center for Windows — v0.7.2
+# Zorin Trust Center for Windows — v0.8.0
 
 Native Windows WPF dashboard for Zorin Trust. It visualizes four independent state axes: Device Trust, Owner Presence, Authority and Transport. It also shows the workstation/phone graph, identity provider, pair verification phrase, and a persistent event timeline produced by `zorin-host-agent` 0.4.
 
@@ -32,3 +32,8 @@ The tray health-checks Ops before opening the browser and can self-start Ops if 
 ## v0.7.2 startup-readiness hotfix
 
 Installer readiness now uses one shared 60-second deadline and direct TCP/HTTP probes rather than three sequential short `Get-NetTCPConnection` checks. Legacy `ZorinTrust*` scheduled tasks are removed through both the ScheduledTasks API and `schtasks.exe`. The native tray waits for Explorer's notification area to become available and is supervised/restarted by the bootstrap if it exits.
+
+
+## v0.8 short-lived SSH infrastructure
+
+The Windows bundle ships Host Agent 0.8, Ops 0.3, Authority 0.3 and Linux Node 0.3 bootstrap binaries for amd64/arm64. Ops can install/update Node through an explicitly approved bootstrap SSH session, enroll the Authority OpenSSH User CA, and then use one-to-five-minute phone-approved user certificates with ephemeral local client keys. Windows OpenSSH `ssh`, `ssh-keygen` and `scp` are preflighted by the installer.
