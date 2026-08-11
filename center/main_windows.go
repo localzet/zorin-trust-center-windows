@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	version = "0.9.1"
+	version = "0.9.2"
 
 	wmDestroy = 0x0002
 	wmCommand = 0x0111

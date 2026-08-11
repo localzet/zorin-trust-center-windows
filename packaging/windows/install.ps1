@@ -7,6 +7,40 @@ $Here = Split-Path -Parent(Split-Path -Parent $ScriptDir)
 if([string]::IsNullOrWhiteSpace($Here)) {
     throw 'Installer internal error: bundle root could not be resolved.'
 }
+
+function Assert-ZorinPowerShellSyntax {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $syntaxErrors = New-Object System.Collections.Generic.List[string]
+    $scripts = @(Get-ChildItem -LiteralPath $Root -Recurse -File -Filter '*.ps1')
+
+    foreach($script in $scripts) {
+        $tokens = $null
+        $parseErrors = $null
+
+        [System.Management.Automation.Language.Parser]::ParseFile(
+            $script.FullName,
+            [ref]$tokens,
+            [ref]$parseErrors
+        ) | Out-Null
+
+        foreach($parseError in @($parseErrors)) {
+            $line = $parseError.Extent.StartLineNumber
+            $syntaxErrors.Add("$($script.FullName):$($line): $($parseError.Message)")
+        }
+    }
+
+    if($syntaxErrors.Count -gt 0) {
+        throw "Release bundle contains invalid PowerShell source:`n$($syntaxErrors -join "`n")"
+    }
+}
+
+# До dot-source и любых изменений системы прогоняем штатный PowerShell parser
+# по всему bundle. Так форматирование не сможет незаметно сломать синтаксис релиза.
+Assert-ZorinPowerShellSyntax -Root $Here
 $State = Join-Path $env:APPDATA 'ZorinTrust'
 $Local = Join-Path $env:LOCALAPPDATA 'ZorinTrust'
 $Bin = Join-Path $Local 'bin'
@@ -336,8 +370,8 @@ Where-Object {
 }
 )
 if($Leftovers.Count -gt 0) {
-    Write-Warning "Legacy Zorin Trust task(s) still present: $($Leftovers.TaskName -join ', '). They are not used by 0.9.1; run 6-STARTUP-DOCTOR.bat for details."
+    Write-Warning "Legacy Zorin Trust task(s) still present: $($Leftovers.TaskName -join ', '). They are not used by 0.9.2; run 6-STARTUP-DOCTOR.bat for details."
 }
-Write-Host 'Zorin Trust 0.9.1 installed. Silent bootstrap is running.' -ForegroundColor Green
+Write-Host 'Zorin Trust 0.9.2 installed. Silent bootstrap is running.' -ForegroundColor Green
 Write-Host 'Left-click the tray icon to open the native Trust Center; Zorin Ops remains the infrastructure control plane.'
 Write-Host 'Lock-on-trust-loss is opt-in and disabled until you enable it in Trust Center.'

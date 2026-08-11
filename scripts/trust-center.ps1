@@ -22,7 +22,7 @@ function UiState() {
     if($s) {
         return $s
     };
-    [pscustomobject]@ {
+    [pscustomobject]@{
         device_trusted=$false;
         owner_present=$false;
         authority_enabled=$false;
@@ -57,7 +57,7 @@ function Paired() {
             if($c.device_labels -and $c.device_labels.($p.Name)) {
                 $label=$c.device_labels.($p.Name)
             };
-            $r+=[pscustomobject]@ {
+            $r+=[pscustomobject]@{
                 Fingerprint=$p.Name;
                 Label=$label
             }
