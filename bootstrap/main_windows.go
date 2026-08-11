@@ -170,7 +170,7 @@ func main() {
 	adb := flag.String("adb", "", "adb executable path")
 	flag.Parse()
 
-	mutexName := bootU16(`Local\ZorinTrustBootstrap-v0.9.0`)
+	mutexName := bootU16(`Local\ZorinTrustBootstrap-v0.9.1`)
 	hMutex, _, mutexErr := bootCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
 	if hMutex == 0 {
 		return
@@ -193,7 +193,7 @@ func main() {
 		return
 	}
 	bootLogPath = filepath.Join(logDir, "bootstrap.log")
-	bootLogf("bootstrap 0.9.0 starting")
+	bootLogf("bootstrap 0.9.1 starting")
 
 	agentArgs := []string{"daemon"}
 	if *adb != "" {
