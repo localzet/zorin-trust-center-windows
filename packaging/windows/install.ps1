@@ -50,13 +50,23 @@ if($devices.Count -eq 1){
 
 Import-Module ScheduledTasks -ErrorAction Stop
 
-# Remove every historical Zorin Trust logon task from earlier bundles before
-# installing the single silent bootstrap task. This prevents old PowerShell/
-# console launchers from surviving upgrades and multiplying windows at logon.
-Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'ZorinTrust*' } | ForEach-Object {
-  try { Stop-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue } catch {}
-  try { Unregister-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+# Remove every historical Zorin Trust task. Some older bundles created tasks
+# via schtasks/PowerShell in ways that ScheduledTasks cmdlets did not reliably
+# unregister during an in-place upgrade, so use both APIs and verify cleanup.
+$oldTasks=@(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'ZorinTrust*' })
+foreach($t in $oldTasks){
+  $fullName = if($t.TaskPath -and $t.TaskPath -ne '\'){ "$($t.TaskPath)$($t.TaskName)" } else { "\$($t.TaskName)" }
+  try { Stop-ScheduledTask -InputObject $t -ErrorAction SilentlyContinue } catch {}
+  try { $t | Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+  try { & schtasks.exe /End /TN $fullName 2>$null | Out-Null } catch {}
+  try { & schtasks.exe /Delete /TN $fullName /F 2>$null | Out-Null } catch {}
 }
+# Explicit legacy names cover historical releases even if enumeration was stale.
+foreach($legacyName in @('ZorinTrustCenterTray','ZorinTrustTray','ZorinTrustHostAgent','ZorinTrustOps','ZorinTrustAuthority')){
+  try { & schtasks.exe /End /TN "\$legacyName" 2>$null | Out-Null } catch {}
+  try { & schtasks.exe /Delete /TN "\$legacyName" /F 2>$null | Out-Null } catch {}
+}
+
 foreach($name in 'ZorinTrustBootstrap','ZorinTrustTray','zorin-ops','zorin-authority','zorin-host-agent'){
   Get-Process $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 }
@@ -92,24 +102,58 @@ $action=New-ScheduledTaskAction -Execute $Bootstrap -Argument $BootstrapArgs
 Register-ScheduledTask -TaskName 'ZorinTrustBootstrap' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName 'ZorinTrustBootstrap'
 
-function Wait-LocalListener([int]$Port,[int]$Seconds=10){
-  $deadline=(Get-Date).AddSeconds($Seconds)
-  do {
-    try {
-      $x=Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $Port -State Listen -ErrorAction Stop
-      if($x){ return $true }
-    } catch {}
-    Start-Sleep -Milliseconds 200
-  } while((Get-Date) -lt $deadline)
-  return $false
+function Test-LocalTcp([int]$Port){
+  $client=New-Object System.Net.Sockets.TcpClient
+  try {
+    $iar=$client.BeginConnect('127.0.0.1',$Port,$null,$null)
+    if(-not $iar.AsyncWaitHandle.WaitOne(350)){ return $false }
+    $client.EndConnect($iar)
+    return $client.Connected
+  } catch { return $false }
+  finally { try{$client.Close()}catch{} }
+}
+function Test-LocalHttp([string]$Url){
+  try {
+    $r=Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 2
+    return ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500)
+  } catch { return $false }
 }
 
-$failed=@()
-foreach($port in 47472,47474,47475){ if(-not(Wait-LocalListener $port 10)){ $failed += $port } }
-if($failed.Count -gt 0){
-  throw "Background bootstrap started but listener(s) did not become ready: $($failed -join ', '). See $Logs\\bootstrap.log and component logs."
+# First launch can be delayed by Defender/SmartScreen scanning several new EXEs.
+# Use one shared deadline for the complete stack rather than three sequential
+# per-port waits, which could report early services as failed even though they
+# became ready moments later.
+$deadline=(Get-Date).AddSeconds(60)
+$ready=$false
+$lastMissing=@()
+do {
+  $missing=@()
+  if(-not(Test-LocalTcp 47472)){ $missing += '47472/host-agent' }
+  if(-not(Test-LocalTcp 47474)){ $missing += '47474/ops' }
+  elseif(-not(Test-LocalHttp 'http://127.0.0.1:47474/api/state')){ $missing += '47474/ops-http' }
+  if(-not(Test-LocalTcp 47475)){ $missing += '47475/authority' }
+  elseif(-not(Test-LocalHttp 'http://127.0.0.1:47475/v1/public-key')){ $missing += '47475/authority-http' }
+  $lastMissing=$missing
+  if($missing.Count -eq 0){ $ready=$true; break }
+  Start-Sleep -Milliseconds 350
+} while((Get-Date) -lt $deadline)
+
+if(-not $ready){
+  throw "Background bootstrap did not become healthy within 60s: $($lastMissing -join ', '). Run 6-STARTUP-DOCTOR.bat and inspect $Logs."
+}
+# Catch a process that bound a port and immediately died.
+Start-Sleep -Milliseconds 750
+if(-not(Test-LocalTcp 47472) -or -not(Test-LocalHttp 'http://127.0.0.1:47474/api/state') -or -not(Test-LocalHttp 'http://127.0.0.1:47475/v1/public-key')){
+  throw "Background stack became ready but did not remain healthy. Run 6-STARTUP-DOCTOR.bat and inspect $Logs."
 }
 
-Write-Host "Zorin Trust 0.7.1 installed. Silent bootstrap is running." -ForegroundColor Green
+# Verify that upgrade cleanup actually removed old tasks. Do not fail a working
+# install solely because Windows retained an inert legacy task; report it loudly.
+$leftovers=@(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'ZorinTrust*' -and $_.TaskName -ne 'ZorinTrustBootstrap' })
+if($leftovers.Count -gt 0){
+  Write-Warning "Legacy Zorin Trust task(s) still present: $($leftovers.TaskName -join ', '). They are not used by 0.7.2; run 6-STARTUP-DOCTOR.bat for details."
+}
+
+Write-Host "Zorin Trust 0.7.2 installed. Silent bootstrap is running." -ForegroundColor Green
 Write-Host 'Background services now run through the console-free native bootstrap. The tray opens Ops only after its local HTTP endpoint is healthy.'
 Write-Host 'Raw diagnostics are under tools\developer; they are not part of the normal UI.'

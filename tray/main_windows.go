@@ -121,6 +121,10 @@ var nid notifyIconData
 var pairScript, statePath string
 var taskbarCreated uint32
 
+func trayLogf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, time.Now().Format(time.RFC3339)+" "+format+"\n", args...)
+}
+
 func u16(s string) *uint16 { p, _ := syscall.UTF16PtrFromString(s); return p }
 func copyTip(dst []uint16, s string) {
 	x := syscall.StringToUTF16(s)
@@ -280,7 +284,7 @@ func updateTip() {
 
 func main() {
 	// Keep one tray instance per interactive Windows session.
-	mutexName := u16(`Local\ZorinTrustTray-v0.7.1`)
+	mutexName := u16(`Local\ZorinTrustTray-v0.7.2`)
 	hMutex, _, mutexErr := pCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
 	if hMutex == 0 {
 		return
@@ -304,20 +308,30 @@ func main() {
 	inst, _, _ := pGetModuleHandle.Call(0)
 	wc := wndClassEx{CbSize: uint32(unsafe.Sizeof(wndClassEx{})), LpfnWndProc: syscall.NewCallback(wndProc), HInstance: inst, LpszClassName: clsName}
 	if r, _, e := pRegisterClassEx.Call(uintptr(unsafe.Pointer(&wc))); r == 0 {
-		fmt.Fprintln(os.Stderr, "register class:", e)
+		trayLogf("register class failed: %v", e)
 		return
 	}
-	hwnd, _, _ = pCreateWindowEx.Call(0, uintptr(unsafe.Pointer(clsName)), uintptr(unsafe.Pointer(u16("Zorin Trust Tray"))), 0, 0, 0, 0, 0, 0, 0, inst, 0)
+	hwnd, _, createErr := pCreateWindowEx.Call(0, uintptr(unsafe.Pointer(clsName)), uintptr(unsafe.Pointer(u16("Zorin Trust Tray"))), 0, 0, 0, 0, 0, 0, 0, inst, 0)
 	if hwnd == 0 {
+		trayLogf("create window failed: %v", createErr)
 		return
 	}
 	iconPath := filepath.Join(dir, "zorin-trust.ico")
 	hicon, _, _ := pLoadImage.Call(0, uintptr(unsafe.Pointer(u16(iconPath))), IMAGE_ICON, 0, 0, LR_LOADFROMFILE)
 	nid = notifyIconData{CbSize: uint32(unsafe.Sizeof(notifyIconData{})), HWnd: hwnd, UID: 1, UFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP, UCallbackMessage: trayMessage, HIcon: hicon}
 	copyTip(nid.SzTip[:], tooltip())
-	if !addTrayIcon() {
-		return
+	// At interactive logon the scheduled bootstrap can beat Explorer. Keep the
+	// tray process alive while the notification area initializes instead of
+	// exiting permanently on the first Shell_NotifyIcon(NIM_ADD) failure.
+	deadline := time.Now().Add(60 * time.Second)
+	for !addTrayIcon() {
+		if time.Now().After(deadline) {
+			trayLogf("notification area not ready after 60s")
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
+	trayLogf("tray icon ready")
 	go func() {
 		t := time.NewTicker(2 * time.Second)
 		defer t.Stop()

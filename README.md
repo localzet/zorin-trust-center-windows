@@ -1,4 +1,4 @@
-# Zorin Trust Center for Windows — v0.7.1
+# Zorin Trust Center for Windows — v0.7.2
 
 Native Windows WPF dashboard for Zorin Trust. It visualizes four independent state axes: Device Trust, Owner Presence, Authority and Transport. It also shows the workstation/phone graph, identity provider, pair verification phrase, and a persistent event timeline produced by `zorin-host-agent` 0.4.
 
@@ -27,3 +27,8 @@ The desktop bundle now ships Zorin Ops 0.2 with editable/removable VPS entries, 
 Windows logon now runs one native GUI-subsystem `ZorinTrustBootstrap.exe` task instead of scheduling console services directly. The bootstrap starts Host Agent, Ops and Authority with `CREATE_NO_WINDOW`, writes local component logs, monitors/restarts background services, and starts the tray without a console. The task is allowed to start on battery power and is not stopped when the laptop switches to battery.
 
 The tray health-checks Ops before opening the browser and can self-start Ops if the service is temporarily missing. The release includes a startup doctor that reports tasks, processes, listeners, HTTP probes and local logs.
+
+
+## v0.7.2 startup-readiness hotfix
+
+Installer readiness now uses one shared 60-second deadline and direct TCP/HTTP probes rather than three sequential short `Get-NetTCPConnection` checks. Legacy `ZorinTrust*` scheduled tasks are removed through both the ScheduledTasks API and `schtasks.exe`. The native tray waits for Explorer's notification area to become available and is supervised/restarted by the bootstrap if it exits.

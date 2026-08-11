@@ -128,25 +128,49 @@ func supervise(s bootService) {
 	}
 }
 
-func startTray(path, logPath string) {
-	cmd := exec.Command(path)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	if f := childLog(logPath); f != nil {
-		cmd.Stdout = f
-		cmd.Stderr = f
+func superviseTray(path, logPath string) {
+	backoff := time.Second
+	for {
+		cmd := exec.Command(path)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		f := childLog(logPath)
+		if f != nil {
+			cmd.Stdout = f
+			cmd.Stderr = f
+		}
+		if err := cmd.Start(); err != nil {
+			if f != nil {
+				_ = f.Close()
+			}
+			bootLogf("tray start failed: %v", err)
+			time.Sleep(backoff)
+			if backoff < 15*time.Second {
+				backoff *= 2
+			}
+			continue
+		}
+		bootLogf("started tray pid=%d", cmd.Process.Pid)
+		started := time.Now()
+		err := cmd.Wait()
+		if f != nil {
+			_ = f.Close()
+		}
+		bootLogf("tray exited after %s: %v", time.Since(started).Round(time.Millisecond), err)
+		if time.Since(started) > 30*time.Second {
+			backoff = time.Second
+		}
+		time.Sleep(backoff)
+		if backoff < 15*time.Second {
+			backoff *= 2
+		}
 	}
-	if err := cmd.Start(); err != nil {
-		bootLogf("tray start failed: %v", err)
-		return
-	}
-	bootLogf("started tray pid=%d", cmd.Process.Pid)
 }
 
 func main() {
 	adb := flag.String("adb", "", "adb executable path")
 	flag.Parse()
 
-	mutexName := bootU16(`Local\ZorinTrustBootstrap-v0.7.1`)
+	mutexName := bootU16(`Local\ZorinTrustBootstrap-v0.7.2`)
 	hMutex, _, mutexErr := bootCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
 	if hMutex == 0 {
 		return
@@ -169,7 +193,7 @@ func main() {
 		return
 	}
 	bootLogPath = filepath.Join(logDir, "bootstrap.log")
-	bootLogf("bootstrap 0.7.1 starting")
+	bootLogf("bootstrap 0.7.2 starting")
 
 	agentArgs := []string{"daemon"}
 	if *adb != "" {
@@ -190,8 +214,7 @@ func main() {
 
 	tray := filepath.Join(uiDir, "ZorinTrustTray.exe")
 	if _, err := os.Stat(tray); err == nil {
-		time.Sleep(400 * time.Millisecond)
-		startTray(tray, filepath.Join(logDir, "tray.log"))
+		go superviseTray(tray, filepath.Join(logDir, "tray.log"))
 	}
 
 	select {}
