@@ -15,57 +15,75 @@ import (
 )
 
 const (
-	WM_DESTROY           = 0x0002
-	WM_COMMAND           = 0x0111
-	WM_USER              = 0x0400
-	WM_LBUTTONUP         = 0x0202
-	WM_LBUTTONDBLCLK     = 0x0203
-	WM_RBUTTONUP         = 0x0205
-	NIM_ADD              = 0x00000000
-	NIM_MODIFY           = 0x00000001
-	NIM_DELETE           = 0x00000002
-	NIM_SETVERSION       = 0x00000004
-	NOTIFYICON_VERSION_4 = 4
-	NIF_MESSAGE          = 0x00000001
-	NIF_ICON             = 0x00000002
-	NIF_TIP              = 0x00000004
-	IMAGE_ICON           = 1
-	LR_LOADFROMFILE      = 0x0010
-	MF_STRING            = 0x00000000
-	MF_SEPARATOR         = 0x00000800
-	TPM_RIGHTBUTTON      = 0x0002
-	TPM_BOTTOMALIGN      = 0x0020
-	SW_SHOWNORMAL        = 1
-	IDC_OPEN             = 1001
-	IDC_PAIR             = 1002
-	IDC_EXIT             = 1003
-	NIN_SELECT           = WM_USER + 0
-	NIN_KEYSELECT        = WM_USER + 1
-	trayMessage          = WM_USER + 17
+	wmDestroy       = 0x0002
+	wmCommand       = 0x0111
+	wmUser          = 0x0400
+	wmLeftButtonUp  = 0x0202
+	wmLeftButtonDbl = 0x0203
+	wmRightButtonUp = 0x0205
+
+	nimAdd        = 0x00000000
+	nimModify     = 0x00000001
+	nimDelete     = 0x00000002
+	nimSetVersion = 0x00000004
+
+	notifyIconVersion4 = 4
+	nifMessage         = 0x00000001
+	nifIcon            = 0x00000002
+	nifTip             = 0x00000004
+
+	imageIcon      = 1
+	lrLoadFromFile = 0x0010
+
+	mfString    = 0x00000000
+	mfSeparator = 0x00000800
+
+	tpmRightButton = 0x0002
+	tpmBottomAlign = 0x0020
+	swShowNormal   = 1
+
+	idOpenCenter = 1001
+	idOpenOps    = 1002
+	idPair       = 1003
+	idExit       = 1004
+
+	ninSelect    = wmUser + 0
+	ninKeySelect = wmUser + 1
+	trayMessage  = wmUser + 17
+
+	createNoWindow = 0x08000000
 )
 
-type point struct{ X, Y int32 }
+type point struct {
+	X int32
+	Y int32
+}
+
 type msg struct {
-	Hwnd           uintptr
-	Message        uint32
-	WParam, LParam uintptr
-	Time           uint32
-	Pt             point
-	LPrivate       uint32
+	Hwnd     uintptr
+	Message  uint32
+	WParam   uintptr
+	LParam   uintptr
+	Time     uint32
+	Pt       point
+	LPrivate uint32
 }
+
 type wndClassEx struct {
-	CbSize                 uint32
-	Style                  uint32
-	LpfnWndProc            uintptr
-	CbClsExtra, CbWndExtra int32
-	HInstance              uintptr
-	HIcon                  uintptr
-	HCursor                uintptr
-	HbrBackground          uintptr
-	LpszMenuName           *uint16
-	LpszClassName          *uint16
-	HIconSm                uintptr
+	CbSize        uint32
+	Style         uint32
+	LpfnWndProc   uintptr
+	CbClsExtra    int32
+	CbWndExtra    int32
+	HInstance     uintptr
+	HIcon         uintptr
+	HCursor       uintptr
+	HbrBackground uintptr
+	LpszMenuName  *uint16
+	LpszClassName *uint16
+	HIconSm       uintptr
 }
+
 type notifyIconData struct {
 	CbSize           uint32
 	HWnd             uintptr
@@ -83,84 +101,419 @@ type notifyIconData struct {
 	GuidItem         [16]byte
 	HBalloonIcon     uintptr
 }
+
 type uiState struct {
 	DeviceTrusted bool   `json:"device_trusted"`
 	OwnerPresent  bool   `json:"owner_present"`
 	Transport     string `json:"transport"`
 }
 
+type windowsSettings struct {
+	LockOnTrustLoss bool `json:"lock_on_trust_loss"`
+}
+
 var (
-	user32                 = syscall.NewLazyDLL("user32.dll")
-	shell32                = syscall.NewLazyDLL("shell32.dll")
-	kernel32               = syscall.NewLazyDLL("kernel32.dll")
-	pRegisterClassEx       = user32.NewProc("RegisterClassExW")
-	pRegisterWindowMessage = user32.NewProc("RegisterWindowMessageW")
-	pCreateWindowEx        = user32.NewProc("CreateWindowExW")
-	pDefWindowProc         = user32.NewProc("DefWindowProcW")
-	pGetMessage            = user32.NewProc("GetMessageW")
-	pTranslateMessage      = user32.NewProc("TranslateMessage")
-	pDispatchMessage       = user32.NewProc("DispatchMessageW")
-	pPostQuitMessage       = user32.NewProc("PostQuitMessage")
-	pShellNotifyIcon       = shell32.NewProc("Shell_NotifyIconW")
-	pLoadImage             = user32.NewProc("LoadImageW")
-	pCreatePopupMenu       = user32.NewProc("CreatePopupMenu")
-	pAppendMenu            = user32.NewProc("AppendMenuW")
-	pTrackPopupMenu        = user32.NewProc("TrackPopupMenu")
-	pDestroyMenu           = user32.NewProc("DestroyMenu")
-	pShellExecute          = shell32.NewProc("ShellExecuteW")
-	pGetCursorPos          = user32.NewProc("GetCursorPos")
-	pSetForegroundWindow   = user32.NewProc("SetForegroundWindow")
-	pMessageBox            = user32.NewProc("MessageBoxW")
-	pGetModuleHandle       = kernel32.NewProc("GetModuleHandleW")
-	pCreateMutex           = kernel32.NewProc("CreateMutexW")
-	pCloseHandle           = kernel32.NewProc("CloseHandle")
+	user32   = syscall.NewLazyDLL("user32.dll")
+	shell32  = syscall.NewLazyDLL("shell32.dll")
+	kernel32 = syscall.NewLazyDLL("kernel32.dll")
+
+	registerClassEx       = user32.NewProc("RegisterClassExW")
+	registerWindowMessage = user32.NewProc("RegisterWindowMessageW")
+	createWindowEx        = user32.NewProc("CreateWindowExW")
+	defWindowProc         = user32.NewProc("DefWindowProcW")
+	getMessage            = user32.NewProc("GetMessageW")
+	translateMessage      = user32.NewProc("TranslateMessage")
+	dispatchMessage       = user32.NewProc("DispatchMessageW")
+	postQuitMessage       = user32.NewProc("PostQuitMessage")
+	shellNotifyIcon       = shell32.NewProc("Shell_NotifyIconW")
+	loadImage             = user32.NewProc("LoadImageW")
+	createPopupMenu       = user32.NewProc("CreatePopupMenu")
+	appendMenu            = user32.NewProc("AppendMenuW")
+	trackPopupMenu        = user32.NewProc("TrackPopupMenu")
+	destroyMenu           = user32.NewProc("DestroyMenu")
+	shellExecute          = shell32.NewProc("ShellExecuteW")
+	getCursorPos          = user32.NewProc("GetCursorPos")
+	setForegroundWindow   = user32.NewProc("SetForegroundWindow")
+	messageBox            = user32.NewProc("MessageBoxW")
+	lockWorkStation       = user32.NewProc("LockWorkStation")
+	getModuleHandle       = kernel32.NewProc("GetModuleHandleW")
+	createMutex           = kernel32.NewProc("CreateMutexW")
+	closeHandle           = kernel32.NewProc("CloseHandle")
+
+	hwnd           uintptr
+	nid            notifyIconData
+	pairScript     string
+	statePath      string
+	settingsPath   string
+	trustCenterExe string
+	taskbarCreated uint32
 )
 
-var hwnd uintptr
-var nid notifyIconData
-var pairScript, statePath string
-var taskbarCreated uint32
-
-func trayLogf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, time.Now().Format(time.RFC3339)+" "+format+"\n", args...)
-}
-
-func u16(s string) *uint16 { p, _ := syscall.UTF16PtrFromString(s); return p }
-func copyTip(dst []uint16, s string) {
-	x := syscall.StringToUTF16(s)
-	if len(x) > len(dst) {
-		x = x[:len(dst)]
+func main() {
+	mutexName := utf16(`Local\ZorinTrustTray-v0.9.0`)
+	mutex, _, mutexErr := createMutex.Call(
+		0,
+		0,
+		uintptr(unsafe.Pointer(mutexName)),
+	)
+	if mutex == 0 {
+		return
 	}
-	copy(dst, x)
+	if mutexErr == syscall.Errno(183) {
+		closeHandle.Call(mutex)
+		return
+	}
+	defer closeHandle.Call(mutex)
+
+	executable, err := os.Executable()
+	if err != nil {
+		return
+	}
+	uiDir := filepath.Dir(executable)
+	pairScript = filepath.Join(uiDir, "pair-phone.bat")
+	trustCenterExe = filepath.Join(uiDir, "ZorinTrustCenter.exe")
+
+	if appData := os.Getenv("APPDATA"); appData != "" {
+		stateDir := filepath.Join(appData, "ZorinTrust")
+		statePath = filepath.Join(stateDir, "ui-state.json")
+		settingsPath = filepath.Join(stateDir, "windows-settings.json")
+	}
+
+	if result, _, _ := registerWindowMessage.Call(
+		uintptr(unsafe.Pointer(utf16("TaskbarCreated"))),
+	); result != 0 {
+		taskbarCreated = uint32(result)
+	}
+
+	if !createMessageWindow() {
+		return
+	}
+	if !loadTrayIcon(uiDir) {
+		return
+	}
+
+	// На логоне bootstrap может стартовать раньше Explorer. Не завершаем tray
+	// из-за первой неудачи, а даём notification area спокойно появиться.
+	deadline := time.Now().Add(60 * time.Second)
+	for !addTrayIcon() {
+		if time.Now().After(deadline) {
+			trayLogf("notification area not ready after 60s")
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	trayLogf("tray icon ready")
+
+	go statusLoop()
+	messageLoop()
 }
 
-func opsHealthy() bool {
-	c := &http.Client{Timeout: 350 * time.Millisecond}
-	r, err := c.Get("http://127.0.0.1:47474/api/state")
-	if err != nil {
+func createMessageWindow() bool {
+	className := utf16("ZorinTrustTrayWindow")
+	instance, _, _ := getModuleHandle.Call(0)
+
+	class := wndClassEx{
+		CbSize:        uint32(unsafe.Sizeof(wndClassEx{})),
+		LpfnWndProc:   syscall.NewCallback(windowProc),
+		HInstance:     instance,
+		LpszClassName: className,
+	}
+	if result, _, err := registerClassEx.Call(
+		uintptr(unsafe.Pointer(&class)),
+	); result == 0 {
+		trayLogf("register class failed: %v", err)
 		return false
 	}
-	defer r.Body.Close()
-	return r.StatusCode >= 200 && r.StatusCode < 500
+
+	var createErr error
+	hwnd, _, createErr = createWindowEx.Call(
+		0,
+		uintptr(unsafe.Pointer(className)),
+		uintptr(unsafe.Pointer(utf16("Zorin Trust Tray"))),
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		instance,
+		0,
+	)
+	if hwnd == 0 {
+		trayLogf("create window failed: %v", createErr)
+		return false
+	}
+
+	return true
 }
 
-func startOpsHidden() {
-	exe, err := os.Executable()
+func loadTrayIcon(uiDir string) bool {
+	iconPath := filepath.Join(uiDir, "zorin-trust.ico")
+	icon, _, _ := loadImage.Call(
+		0,
+		uintptr(unsafe.Pointer(utf16(iconPath))),
+		imageIcon,
+		0,
+		0,
+		lrLoadFromFile,
+	)
+
+	nid = notifyIconData{
+		CbSize:           uint32(unsafe.Sizeof(notifyIconData{})),
+		HWnd:             hwnd,
+		UID:              1,
+		UFlags:           nifMessage | nifIcon | nifTip,
+		UCallbackMessage: trayMessage,
+		HIcon:            icon,
+	}
+	copyTip(nid.SzTip[:], tooltip(readUIState()))
+	return true
+}
+
+func messageLoop() {
+	var message msg
+	for {
+		result, _, _ := getMessage.Call(
+			uintptr(unsafe.Pointer(&message)),
+			0,
+			0,
+			0,
+		)
+		if int32(result) <= 0 {
+			return
+		}
+		translateMessage.Call(uintptr(unsafe.Pointer(&message)))
+		dispatchMessage.Call(uintptr(unsafe.Pointer(&message)))
+	}
+}
+
+func statusLoop() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	previousTrusted := false
+	initialized := false
+	var disconnectedSince time.Time
+
+	for range ticker.C {
+		state := readUIState()
+		updateTip(state)
+
+		if !initialized {
+			previousTrusted = state.DeviceTrusted
+			initialized = true
+			continue
+		}
+
+		settings := readSettings()
+		if !settings.LockOnTrustLoss {
+			previousTrusted = state.DeviceTrusted
+			disconnectedSince = time.Time{}
+			continue
+		}
+
+		if state.DeviceTrusted {
+			previousTrusted = true
+			disconnectedSince = time.Time{}
+			continue
+		}
+
+		if previousTrusted && disconnectedSince.IsZero() {
+			disconnectedSince = time.Now()
+		}
+
+		// Короткий USB/ADB hiccup не должен мгновенно запирать рабочий стол.
+		// Блокируем только если trust действительно отсутствует несколько секунд.
+		if !disconnectedSince.IsZero() && time.Since(disconnectedSince) >= 3*time.Second {
+			trayLogf("trusted phone lost; locking workstation")
+			lockWorkStation.Call()
+			previousTrusted = false
+			disconnectedSince = time.Time{}
+		}
+	}
+}
+
+func readUIState() uiState {
+	var state uiState
+	if statePath == "" {
+		return state
+	}
+
+	raw, err := os.ReadFile(statePath)
 	if err != nil {
+		return state
+	}
+	_ = json.Unmarshal(raw, &state)
+	return state
+}
+
+func readSettings() windowsSettings {
+	var settings windowsSettings
+	if settingsPath == "" {
+		return settings
+	}
+
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return settings
+	}
+	_ = json.Unmarshal(raw, &settings)
+	return settings
+}
+
+func windowProc(
+	handle uintptr,
+	message uint32,
+	wParam uintptr,
+	lParam uintptr,
+) uintptr {
+	if taskbarCreated != 0 && message == taskbarCreated {
+		addTrayIcon()
+		return 0
+	}
+
+	switch message {
+	case trayMessage:
+		// В NOTIFYICON_VERSION_4 событие находится в LOWORD(lParam), а id
+		// иконки — в HIWORD. Сравнивать весь lParam нельзя.
+		event := uint32(lParam & 0xffff)
+		switch event {
+		case wmLeftButtonUp, wmLeftButtonDbl, ninSelect, ninKeySelect:
+			openTrustCenter()
+			return 0
+		case wmRightButtonUp:
+			showMenu()
+			return 0
+		}
+
+	case wmCommand:
+		switch int(wParam & 0xffff) {
+		case idOpenCenter:
+			openTrustCenter()
+		case idOpenOps:
+			go openOps()
+		case idPair:
+			openPair()
+		case idExit:
+			shellNotifyIcon.Call(nimDelete, uintptr(unsafe.Pointer(&nid)))
+			postQuitMessage.Call(0)
+		}
+		return 0
+
+	case wmDestroy:
+		shellNotifyIcon.Call(nimDelete, uintptr(unsafe.Pointer(&nid)))
+		postQuitMessage.Call(0)
+		return 0
+	}
+
+	result, _, _ := defWindowProc.Call(handle, uintptr(message), wParam, lParam)
+	return result
+}
+
+func showMenu() {
+	menu, _, _ := createPopupMenu.Call()
+	if menu == 0 {
 		return
 	}
-	ops := filepath.Join(filepath.Dir(filepath.Dir(exe)), "bin", "zorin-ops.exe")
-	if _, err := os.Stat(ops); err != nil {
+	defer destroyMenu.Call(menu)
+
+	appendMenu.Call(
+		menu,
+		mfString,
+		idOpenCenter,
+		uintptr(unsafe.Pointer(utf16("Open Trust Center"))),
+	)
+	appendMenu.Call(
+		menu,
+		mfString,
+		idOpenOps,
+		uintptr(unsafe.Pointer(utf16("Open Zorin Ops"))),
+	)
+	appendMenu.Call(menu, mfSeparator, 0, 0)
+	appendMenu.Call(
+		menu,
+		mfString,
+		idPair,
+		uintptr(unsafe.Pointer(utf16("Pair phone"))),
+	)
+	appendMenu.Call(menu, mfSeparator, 0, 0)
+	appendMenu.Call(
+		menu,
+		mfString,
+		idExit,
+		uintptr(unsafe.Pointer(utf16("Exit tray"))),
+	)
+
+	var cursor point
+	getCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
+	setForegroundWindow.Call(hwnd)
+	trackPopupMenu.Call(
+		menu,
+		tpmRightButton|tpmBottomAlign,
+		uintptr(cursor.X),
+		uintptr(cursor.Y),
+		0,
+		hwnd,
+		0,
+	)
+}
+
+func addTrayIcon() bool {
+	result, _, _ := shellNotifyIcon.Call(
+		nimAdd,
+		uintptr(unsafe.Pointer(&nid)),
+	)
+	if result == 0 {
+		return false
+	}
+
+	nid.UVersion = notifyIconVersion4
+	shellNotifyIcon.Call(nimSetVersion, uintptr(unsafe.Pointer(&nid)))
+	return true
+}
+
+func tooltip(state uiState) string {
+	if state.DeviceTrusted && state.OwnerPresent {
+		return "Zorin Trust — Owner verified"
+	}
+	if state.DeviceTrusted {
+		return "Zorin Trust — Device trusted, phone locked"
+	}
+	if state.Transport != "" && state.Transport != "Offline" {
+		return "Zorin Trust — Connecting"
+	}
+	return "Zorin Trust — Phone disconnected"
+}
+
+func updateTip(state uiState) {
+	copyTip(nid.SzTip[:], tooltip(state))
+	shellNotifyIcon.Call(nimModify, uintptr(unsafe.Pointer(&nid)))
+}
+
+func openTrustCenter() {
+	if _, err := os.Stat(trustCenterExe); err != nil {
+		showError("ZorinTrustCenter.exe is missing from the installed UI directory.")
 		return
 	}
-	cmd := exec.Command(ops)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
-	_ = cmd.Start()
+
+	command := exec.Command(trustCenterExe)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := command.Start(); err != nil {
+		showError(err.Error())
+	}
+}
+
+func openPair() {
+	if pairScript == "" {
+		return
+	}
+
+	command := exec.Command("cmd.exe", "/C", "start", "", pairScript)
+	_ = command.Start()
 }
 
 func openOps() {
-	// Never send the browser to a dead localhost endpoint. The tray can self-heal
-	// Ops even if the background bootstrap has not restarted it yet.
 	if !opsHealthy() {
 		startOpsHidden()
 		deadline := time.Now().Add(5 * time.Second)
@@ -171,181 +524,89 @@ func openOps() {
 			}
 		}
 	}
+
 	if !opsHealthy() {
-		text := u16("Zorin Ops is not responding on 127.0.0.1:47474.\n\nCheck %LOCALAPPDATA%\\ZorinTrust\\logs\\ops.log or run 6-STARTUP-DOCTOR.bat from the release bundle.")
-		caption := u16("Zorin Trust")
-		pMessageBox.Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(caption)), 0x10)
+		showError(
+			"Zorin Ops is not responding on 127.0.0.1:47474.\n\n" +
+				"Check %LOCALAPPDATA%\\ZorinTrust\\logs\\ops.log or run the startup doctor.",
+		)
 		return
 	}
-	verb := u16("open")
-	url := u16("http://127.0.0.1:47474/")
-	pShellExecute.Call(0, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(url)), 0, 0, SW_SHOWNORMAL)
+
+	verb := utf16("open")
+	url := utf16("http://127.0.0.1:47474/")
+	shellExecute.Call(
+		0,
+		uintptr(unsafe.Pointer(verb)),
+		uintptr(unsafe.Pointer(url)),
+		0,
+		0,
+		swShowNormal,
+	)
 }
 
-func requestOpenOps() { go openOps() }
-func openPair() {
-	if pairScript == "" {
-		return
+func opsHealthy() bool {
+	client := &http.Client{
+		Timeout: 350 * time.Millisecond,
 	}
-	cmd := exec.Command("cmd.exe", "/C", "start", "", pairScript)
-	_ = cmd.Start()
-}
-
-func addTrayIcon() bool {
-	if r, _, _ := pShellNotifyIcon.Call(NIM_ADD, uintptr(unsafe.Pointer(&nid))); r == 0 {
+	response, err := client.Get("http://127.0.0.1:47474/api/state")
+	if err != nil {
 		return false
 	}
-	nid.UVersion = NOTIFYICON_VERSION_4
-	pShellNotifyIcon.Call(NIM_SETVERSION, uintptr(unsafe.Pointer(&nid)))
-	return true
+	defer response.Body.Close()
+
+	return response.StatusCode >= 200 && response.StatusCode < 500
 }
 
-func wndProc(h uintptr, m uint32, w, l uintptr) uintptr {
-	if taskbarCreated != 0 && m == taskbarCreated {
-		// Explorer recreates the notification area after a restart. Re-add our icon.
-		addTrayIcon()
-		return 0
-	}
-	switch m {
-	case trayMessage:
-		// With NOTIFYICON_VERSION_4 the event is in LOWORD(lParam) and the
-		// icon id occupies HIWORD(lParam). Comparing the full lParam was the
-		// reason left-clicks in v0.5.x appeared to do nothing.
-		event := uint32(l & 0xffff)
-		switch event {
-		case WM_LBUTTONUP, WM_LBUTTONDBLCLK, NIN_SELECT, NIN_KEYSELECT:
-			requestOpenOps()
-			return 0
-		case WM_RBUTTONUP:
-			showMenu()
-			return 0
-		}
-	case WM_COMMAND:
-		switch int(w & 0xffff) {
-		case IDC_OPEN:
-			requestOpenOps()
-		case IDC_PAIR:
-			openPair()
-		case IDC_EXIT:
-			pShellNotifyIcon.Call(NIM_DELETE, uintptr(unsafe.Pointer(&nid)))
-			pPostQuitMessage.Call(0)
-		}
-		return 0
-	case WM_DESTROY:
-		pShellNotifyIcon.Call(NIM_DELETE, uintptr(unsafe.Pointer(&nid)))
-		pPostQuitMessage.Call(0)
-		return 0
-	}
-	r, _, _ := pDefWindowProc.Call(h, uintptr(m), w, l)
-	return r
-}
-
-func showMenu() {
-	menu, _, _ := pCreatePopupMenu.Call()
-	if menu == 0 {
-		return
-	}
-	defer pDestroyMenu.Call(menu)
-	pAppendMenu.Call(menu, MF_STRING, IDC_OPEN, uintptr(unsafe.Pointer(u16("Open Zorin Ops"))))
-	pAppendMenu.Call(menu, MF_SEPARATOR, 0, 0)
-	pAppendMenu.Call(menu, MF_STRING, IDC_PAIR, uintptr(unsafe.Pointer(u16("Pair phone"))))
-	pAppendMenu.Call(menu, MF_SEPARATOR, 0, 0)
-	pAppendMenu.Call(menu, MF_STRING, IDC_EXIT, uintptr(unsafe.Pointer(u16("Exit tray"))))
-	var pt point
-	pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
-	pSetForegroundWindow.Call(hwnd)
-	pTrackPopupMenu.Call(menu, TPM_RIGHTBUTTON|TPM_BOTTOMALIGN, uintptr(pt.X), uintptr(pt.Y), 0, hwnd, 0)
-}
-
-func tooltip() string {
-	b, err := os.ReadFile(statePath)
+func startOpsHidden() {
+	executable, err := os.Executable()
 	if err != nil {
-		return "Zorin Trust — offline"
+		return
 	}
-	var s uiState
-	if json.Unmarshal(b, &s) != nil {
-		return "Zorin Trust"
+
+	opsPath := filepath.Join(
+		filepath.Dir(filepath.Dir(executable)),
+		"bin",
+		"zorin-ops.exe",
+	)
+	if _, err := os.Stat(opsPath); err != nil {
+		return
 	}
-	if s.DeviceTrusted && s.OwnerPresent {
-		return "Zorin Trust — Owner verified"
+
+	command := exec.Command(opsPath)
+	command.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: createNoWindow,
 	}
-	if s.DeviceTrusted {
-		return "Zorin Trust — Device trusted, phone locked"
-	}
-	if s.Transport != "" && s.Transport != "Offline" {
-		return "Zorin Trust — Connecting"
-	}
-	return "Zorin Trust — Phone disconnected"
-}
-func updateTip() {
-	copyTip(nid.SzTip[:], tooltip())
-	pShellNotifyIcon.Call(NIM_MODIFY, uintptr(unsafe.Pointer(&nid)))
+	_ = command.Start()
 }
 
-func main() {
-	// Keep one tray instance per interactive Windows session.
-	mutexName := u16(`Local\ZorinTrustTray-v0.8.0`)
-	hMutex, _, mutexErr := pCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
-	if hMutex == 0 {
-		return
-	}
-	if mutexErr == syscall.Errno(183) { // ERROR_ALREADY_EXISTS
-		pCloseHandle.Call(hMutex)
-		return
-	}
-	defer pCloseHandle.Call(hMutex)
+func showError(text string) {
+	messageBox.Call(
+		0,
+		uintptr(unsafe.Pointer(utf16(text))),
+		uintptr(unsafe.Pointer(utf16("Zorin Trust"))),
+		0x10,
+	)
+}
 
-	exe, _ := os.Executable()
-	dir := filepath.Dir(exe)
-	pairScript = filepath.Join(dir, "pair-phone.bat")
-	if appdata := os.Getenv("APPDATA"); appdata != "" {
-		statePath = filepath.Join(appdata, "ZorinTrust", "ui-state.json")
+func trayLogf(format string, args ...any) {
+	fmt.Fprintf(
+		os.Stderr,
+		time.Now().Format(time.RFC3339)+" "+format+"\n",
+		args...,
+	)
+}
+
+func utf16(value string) *uint16 {
+	pointer, _ := syscall.UTF16PtrFromString(value)
+	return pointer
+}
+
+func copyTip(destination []uint16, value string) {
+	encoded := syscall.StringToUTF16(value)
+	if len(encoded) > len(destination) {
+		encoded = encoded[:len(destination)]
 	}
-	if r, _, _ := pRegisterWindowMessage.Call(uintptr(unsafe.Pointer(u16("TaskbarCreated")))); r != 0 {
-		taskbarCreated = uint32(r)
-	}
-	clsName := u16("ZorinTrustTrayWindow")
-	inst, _, _ := pGetModuleHandle.Call(0)
-	wc := wndClassEx{CbSize: uint32(unsafe.Sizeof(wndClassEx{})), LpfnWndProc: syscall.NewCallback(wndProc), HInstance: inst, LpszClassName: clsName}
-	if r, _, e := pRegisterClassEx.Call(uintptr(unsafe.Pointer(&wc))); r == 0 {
-		trayLogf("register class failed: %v", e)
-		return
-	}
-	hwnd, _, createErr := pCreateWindowEx.Call(0, uintptr(unsafe.Pointer(clsName)), uintptr(unsafe.Pointer(u16("Zorin Trust Tray"))), 0, 0, 0, 0, 0, 0, 0, inst, 0)
-	if hwnd == 0 {
-		trayLogf("create window failed: %v", createErr)
-		return
-	}
-	iconPath := filepath.Join(dir, "zorin-trust.ico")
-	hicon, _, _ := pLoadImage.Call(0, uintptr(unsafe.Pointer(u16(iconPath))), IMAGE_ICON, 0, 0, LR_LOADFROMFILE)
-	nid = notifyIconData{CbSize: uint32(unsafe.Sizeof(notifyIconData{})), HWnd: hwnd, UID: 1, UFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP, UCallbackMessage: trayMessage, HIcon: hicon}
-	copyTip(nid.SzTip[:], tooltip())
-	// At interactive logon the scheduled bootstrap can beat Explorer. Keep the
-	// tray process alive while the notification area initializes instead of
-	// exiting permanently on the first Shell_NotifyIcon(NIM_ADD) failure.
-	deadline := time.Now().Add(60 * time.Second)
-	for !addTrayIcon() {
-		if time.Now().After(deadline) {
-			trayLogf("notification area not ready after 60s")
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	trayLogf("tray icon ready")
-	go func() {
-		t := time.NewTicker(2 * time.Second)
-		defer t.Stop()
-		for range t.C {
-			updateTip()
-		}
-	}()
-	var m msg
-	for {
-		r, _, _ := pGetMessage.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
-		if int32(r) <= 0 {
-			break
-		}
-		pTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
-		pDispatchMessage.Call(uintptr(unsafe.Pointer(&m)))
-	}
+	copy(destination, encoded)
 }
